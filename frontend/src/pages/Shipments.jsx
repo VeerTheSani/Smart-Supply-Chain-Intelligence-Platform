@@ -1,7 +1,7 @@
 import { memo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Package, ShieldAlert, Navigation, Search, Filter } from 'lucide-react';
-import { useShipments } from '../hooks/useApi';
+import { useShipments } from '../hooks/useShipments';
 import { useShipmentStore } from '../stores/shipmentStore';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import ErrorFallback from '../components/ui/ErrorFallback';
@@ -14,7 +14,7 @@ const Shipments = memo(function Shipments() {
   const [rerouteId, setRerouteId] = useState(null);
 
   if (isLoading) {
-    return <div className="py-24 flex flex-col items-center justify-center gap-4"><LoadingSpinner /><p className="text-surface-400 text-sm tracking-widest uppercase font-bold animate-pulse">Loading Route Architectures...</p></div>;
+    return <div className="py-24 flex flex-col items-center justify-center gap-4"><LoadingSpinner /><p className="text-theme-secondary text-sm tracking-widest uppercase font-bold animate-pulse">Loading Route Architectures...</p></div>;
   }
   if (error) {
     return <ErrorFallback error={error} />;
@@ -26,22 +26,22 @@ const Shipments = memo(function Shipments() {
         <motion.h1
           initial={{ opacity: 0, x: -10 }}
           animate={{ opacity: 1, x: 0 }}
-          className="text-2xl font-bold text-white flex items-center gap-2 tracking-tight"
+          className="text-2xl font-bold text-theme-primary flex items-center gap-2 tracking-tight"
         >
-          <Package className="w-6 h-6 text-primary-400" />
+          <Package className="w-6 h-6 text-accent" />
           Shipment Core
         </motion.h1>
 
         <div className="flex w-full sm:w-auto items-center gap-3">
           <div className="relative w-full sm:w-64">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-theme-secondary" />
             <input 
               type="text" 
               placeholder="Search ID, Origin..." 
-              className="w-full bg-surface-900 border border-surface-800 rounded-xl py-2 pl-10 pr-4 text-sm text-white focus:ring-2 focus:ring-primary-500 focus:outline-none transition-all"
+              className="w-full bg-theme-secondary border border-theme rounded-xl py-2 pl-10 pr-4 text-sm text-theme-primary focus:ring-2 focus:ring-primary-500 focus:outline-none transition-all"
             />
           </div>
-          <button className="flex items-center gap-2 px-4 py-2 bg-surface-900 border border-surface-800 rounded-xl text-sm font-medium hover:bg-surface-800 transition-colors cursor-pointer">
+          <button className="flex items-center gap-2 px-4 py-2 bg-theme-secondary border border-theme rounded-xl text-sm font-medium hover:bg-theme-tertiary transition-colors cursor-pointer text-theme-primary">
             <Filter className="w-4 h-4" /> Filter
           </button>
         </div>
@@ -50,12 +50,12 @@ const Shipments = memo(function Shipments() {
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="glass rounded-2xl overflow-hidden border border-surface-800/50 shadow-2xl"
+        className="bg-theme-secondary rounded-2xl overflow-hidden border border-theme shadow-lg"
       >
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-surface-900/50 text-surface-400 text-xs uppercase tracking-widest px-6">
+              <tr className="bg-theme-tertiary text-theme-secondary text-xs uppercase tracking-widest px-6">
                 <th className="py-4 px-6 font-semibold">Tracking ID</th>
                 <th className="py-4 px-6 font-semibold">Route Endpoint</th>
                 <th className="py-4 px-6 font-semibold">Status</th>
@@ -64,12 +64,12 @@ const Shipments = memo(function Shipments() {
                 <th className="py-4 px-6 font-semibold text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-surface-800/50">
+            <tbody className="divide-y divide-theme">
               {shipments?.length === 0 ? (
                 <tr>
-                  <td colSpan="6" className="py-20 text-center text-surface-500">
+                  <td colSpan="6" className="py-20 text-center text-theme-secondary">
                      <div className="flex flex-col items-center justify-center gap-3">
-                        <Package className="w-10 h-10 text-surface-600 opacity-50" />
+                        <Package className="w-10 h-10 text-theme-secondary opacity-30" />
                         <span className="text-sm font-medium uppercase tracking-widest">No active shipments in system.</span>
                      </div>
                   </td>
@@ -88,34 +88,34 @@ const Shipments = memo(function Shipments() {
                     <tr 
                       key={shipment.id} 
                       className={cn(
-                        "group transition-colors hover:bg-surface-800/30",
-                        isCritical && "bg-red-950/10"
+                        "group transition-colors hover:bg-theme-tertiary/50",
+                        isCritical && "bg-danger/5"
                       )}
                     >
                       <td className="py-4 px-6">
-                        <span className="font-mono text-sm font-semibold text-surface-200 bg-surface-900 px-2 py-1 rounded">
+                        <span className="font-mono text-sm font-semibold text-theme-primary bg-theme-tertiary px-2 py-1 rounded">
                           {shipment.tracking_number}
                         </span>
                       </td>
                       
                       <td className="py-4 px-6">
                         <div className="flex items-center gap-2 text-sm">
-                          <span className="text-surface-300">{shipment.origin}</span>
-                          <span className="text-surface-600 font-bold">→</span>
-                          <span className="text-white font-medium">{shipment.destination}</span>
+                          <span className="text-theme-secondary">{shipment.origin}</span>
+                          <span className="text-theme-secondary font-bold opacity-50">→</span>
+                          <span className="text-theme-primary font-medium">{shipment.destination}</span>
                         </div>
                       </td>
 
                       <td className="py-4 px-6">
-                        <span className="text-xs tracking-wider uppercase font-bold text-surface-400">
+                        <span className="text-xs tracking-wider uppercase font-bold text-theme-secondary">
                           {shipment.status}
                         </span>
                       </td>
 
                       <td className="py-4 px-6">
-                        <div className="text-xs text-surface-400 flex flex-col gap-0.5">
+                        <div className="text-xs text-theme-secondary flex flex-col gap-0.5">
                           {shipment.conditions?.weather && <span>{shipment.conditions.weather}</span>}
-                          {shipment.conditions?.traffic && <span className="text-surface-500">{shipment.conditions.traffic}</span>}
+                          {shipment.conditions?.traffic && <span className="opacity-60">{shipment.conditions.traffic}</span>}
                         </div>
                       </td>
 
@@ -142,7 +142,7 @@ const Shipments = memo(function Shipments() {
                         ) : (
                           <button 
                             onClick={() => alert(`INSPECTION INITIATED\n\nTracing Payload: ${shipment.tracking_number}\nRouting: ${shipment.origin} -> ${shipment.destination}\nRisk Assesment: ${riskLevel.toUpperCase()}`)}
-                            className="text-xs font-bold text-surface-500 uppercase cursor-pointer hover:text-surface-300 transition-colors"
+                            className="text-xs font-bold text-theme-secondary uppercase cursor-pointer hover:text-theme-primary transition-colors"
                           >
                             Inspect
                           </button>

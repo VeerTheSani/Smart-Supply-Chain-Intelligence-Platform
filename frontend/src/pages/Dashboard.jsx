@@ -1,14 +1,16 @@
 import { memo } from 'react';
 import { motion } from 'framer-motion';
 import { Activity, AlertTriangle, ShieldCheck, TrendingUp, Navigation, Package } from 'lucide-react';
-import { useDashboard, useShipments } from '../hooks/useApi';
-import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline } from 'react-leaflet';
+import { useDashboard } from '../hooks/useDashboard';
+import { useShipments } from '../hooks/useShipments';
+import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline, Tooltip } from 'react-leaflet';
 import { useShipmentStore } from '../stores/shipmentStore';
+import { useTheme } from '../context/ThemeContext';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import icon from 'leaflet/dist/images/marker-icon.png';
 import iconShadow from 'leaflet/dist/images/marker-shadow.png';
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 
 let DefaultIcon = L.icon({
@@ -27,99 +29,101 @@ const StatCard = memo(function StatCard({ title, value, icon: Icon, trend, color
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay }}
-      className={`glass rounded-2xl p-6 border-b-4 ${colorClass}`}
+      className={`bg-theme-secondary rounded-2xl p-6 border-default shadow-md border-b-4 ${colorClass}`}
     >
       <div className="flex justify-between items-start">
         <div className="space-y-4">
-          <p className="text-surface-400 text-sm font-semibold tracking-wider uppercase">{title}</p>
+          <p className="text-theme-secondary text-sm font-semibold tracking-wider uppercase">{title}</p>
           <div className="flex items-end gap-3">
-            <h3 className="text-4xl font-bold text-white tracking-tight">{value}</h3>
+            <h3 className="text-4xl font-bold text-theme-primary tracking-tight">{value}</h3>
             {trend && (
-              <span className={`flex items-center gap-1 text-sm font-medium pb-1 ${trend > 0 ? 'text-primary-400' : 'text-red-400'}`}>
+              <span className={`flex items-center gap-1 text-sm font-medium pb-1 ${trend > 0 ? 'text-success' : 'text-danger'}`}>
                 {trend > 0 ? '+' : ''}{trend}% <TrendingUp className="w-3 h-3" />
               </span>
             )}
           </div>
         </div>
-        <div className={`p-3 rounded-xl bg-surface-800 shadow-inner ${colorClass.replace('border-', 'text-')}`}>
+        <div className={`p-3 rounded-xl bg-theme-tertiary shadow-inner ${colorClass.replace('border-', 'text-')}`}>
           <Icon className="w-6 h-6" />
         </div>
       </div>
     </motion.div>
   );
 });
-// 👇 ADD THIS ABOVE Dashboard component
-function AutoCenter({ shipments }) {
+
+function FitBounds({ shipments }) {
   const map = useMap();
 
   useEffect(() => {
-    if (!shipments || shipments.length === 0) return;
+    const points = shipments
+      ?.filter(s => s.current_location?.lat && s.current_location?.lng)
+      .map(s => [s.current_location.lat, s.current_location.lng]);
 
-    const valid = shipments.filter(
-      s => s.current_location?.lat && s.current_location?.lng
-    );
-
-    if (valid.length === 0) return;
-
-    const last = valid[valid.length - 1];
-
-    // Only move if far away (prevents jitter)
-    const currentCenter = map.getCenter();
-
-    if (
-      Math.abs(currentCenter.lat - last.current_location.lat) > 0.1 ||
-      Math.abs(currentCenter.lng - last.current_location.lng) > 0.1
-    ) {
-      map.setView(
-        [last.current_location.lat, last.current_location.lng],
-        6
-      );
+    if (points.length > 0) {
+      const bounds = L.latLngBounds(points);
+      map.fitBounds(bounds, {
+        padding: [80, 80],
+        maxZoom: 7
+      });
     }
   }, [shipments, map]);
 
   return null;
 }
-const getMarkerIcon = (risk) => {
+
+const getMarkerIcon = (risk, isSelected, theme) => {
   const isHigh = risk === "high" || risk === "critical";
   const isMedium = risk === "medium";
-  const color = isHigh ? "#ef4444" : isMedium ? "#facc15" : "#22c55e";
+  const color = isHigh ? "#ff3b3b" : isMedium ? "#facc15" : "#22c55e";
   const pulseClass = isHigh ? "marker-pulse-high" : isMedium ? "marker-pulse-medium" : "";
+  const glow = isSelected
+    ? "0 0 12px rgba(59,130,246,0.9)"
+    : "0 0 6px rgba(0,0,0,0.7)";
+  
+  const borderColor = theme === 'dark' ? '#1e293b' : '#e2e8f0';
 
   return new L.DivIcon({
     className: "custom-marker",
     html: `<div class="${pulseClass}" style="
       background:${color};
-      width:14px;
-      height:14px;
+      width:16px;
+      height:16px;
       border-radius:50%;
-      border:2px solid #1e293b;
-      box-shadow: 0 0 6px rgba(0,0,0,0.7);"></div>`
+      border:2px solid ${borderColor};
+      box-shadow:${glow};
+      cursor: pointer;
+      "></div>`
   });
 };
 
 const Dashboard = memo(function Dashboard() {
+  const { theme } = useTheme();
+  const [selectedId, setSelectedId] = useState(null);
   const { data, isLoading, error } = useDashboard();
-  const { isLoading: shipmentsLoading } = useShipments(); 
+  const { isLoading: shipmentsLoading } = useShipments();
   const shipments = useShipmentStore(state => state.shipments);
+  const highRiskCount = shipments.filter(
+    s => s.risk?.current?.risk_level === 'high'
+  ).length;
 
-  if (isLoading) return <div className="py-24 flex flex-col items-center justify-center gap-4"><LoadingSpinner /><p className="text-surface-400 text-sm tracking-widest uppercase font-bold animate-pulse">Loading Live Intelligence...</p></div>;
+  if (isLoading) return <div className="py-24 flex flex-col items-center justify-center gap-4"><LoadingSpinner /><p className="text-theme-secondary text-sm tracking-widest uppercase font-bold animate-pulse">Loading Live Intelligence...</p></div>;
   if (error) return <ErrorFallback error={error} />;
 
   const isLowRisk = data?.avg_risk_score < 40;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 bg-theme-primary">
       <div>
         <motion.h1
           initial={{ opacity: 0, x: -10 }}
           animate={{ opacity: 1, x: 0 }}
-          className="text-3xl font-bold text-white tracking-tight"
+          className="text-3xl font-bold text-theme-primary tracking-tight"
         >
           Control Center
         </motion.h1>
         <motion.p
           initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1 }}
-          className="text-surface-400 mt-1"
+          className="text-theme-secondary mt-1"
         >
           Real-time systemic intelligence and global network visualization
         </motion.p>
@@ -131,14 +135,14 @@ const Dashboard = memo(function Dashboard() {
           value={data?.total_shipments || 0}
           icon={Package}
           trend={12}
-          colorClass="border-surface-600"
+          colorClass="border-theme"
           delay={0.1}
         />
         <StatCard
           title="Active Disruptions"
           value={data?.active_disruptions || 0}
           icon={AlertTriangle}
-          colorClass={data?.active_disruptions > 0 ? 'border-primary-500' : 'border-green-500'}
+          colorClass={data?.active_disruptions > 0 ? 'border-primary-500' : 'border-success'}
           delay={0.2}
         />
         <StatCard
@@ -146,7 +150,7 @@ const Dashboard = memo(function Dashboard() {
           value={data?.avg_risk_score ? data.avg_risk_score.toFixed(1) : "0"}
           icon={Activity}
           trend={-5}
-          colorClass={isLowRisk ? 'border-green-500' : 'border-yellow-500'}
+          colorClass={isLowRisk ? 'border-success' : 'border-warning'}
           delay={0.3}
         />
         <StatCard
@@ -164,99 +168,111 @@ const Dashboard = memo(function Dashboard() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.6 }}
-        className="glass rounded-3xl overflow-hidden border border-surface-800 shadow-2xl flex flex-col"
+        className="glass-panel rounded-3xl overflow-hidden border border-theme shadow-2xl flex flex-col"
       >
-        <div className="px-6 py-4 border-b border-surface-800/50 bg-surface-900/30 flex justify-between items-center z-10 relative">
-          <h2 className="text-lg font-bold text-white flex items-center gap-2">
-            <Navigation className="w-5 h-5 text-primary-400" /> Live Shipment Tracking
+        <div className="px-6 py-4 border-b border-theme bg-theme-secondary/30 flex justify-between items-center z-10 relative">
+          <h2 className="text-lg font-bold text-theme-primary flex items-center gap-2">
+            <Navigation className="w-5 h-5 text-accent" /> Live Shipment Tracking
           </h2>
-          <div className="flex gap-4 text-[10px] uppercase font-bold tracking-widest bg-surface-950/50 px-3 py-1.5 rounded-lg border border-surface-800">
-            <span className="flex items-center gap-1.5 text-green-400"><div className="w-2.5 h-2.5 rounded-full bg-green-500 shadow-sm shadow-green-500/50"></div> Safe</span>
-            <span className="flex items-center gap-1.5 text-orange-400"><div className="w-2.5 h-2.5 rounded-full bg-orange-500 shadow-sm shadow-orange-500/50"></div> Warning</span>
-            <span className="flex items-center gap-1.5 text-red-400"><div className="w-2.5 h-2.5 rounded-full bg-red-500 shadow-sm shadow-red-500/50"></div> High Risk</span>
+          <div className="flex gap-4 text-[10px] uppercase font-bold tracking-widest bg-theme-primary/50 px-3 py-1.5 rounded-lg border border-theme">
+            <span className="flex items-center gap-1.5 text-success"><div className="w-2.5 h-2.5 rounded-full bg-success shadow-sm shadow-success/50"></div> Safe</span>
+            <span className="flex items-center gap-1.5 text-warning"><div className="w-2.5 h-2.5 rounded-full bg-warning shadow-sm shadow-warning/50"></div> Warning</span>
+            <span className="flex items-center gap-1.5 text-danger"><div className="w-2.5 h-2.5 rounded-full bg-danger shadow-sm shadow-danger/50"></div> High Risk</span>
           </div>
         </div>
-        
+
         <div className="h-[400px] relative z-0">
-          <MapContainer center={[23.0225, 72.5714]} zoom={5} scrollWheelZoom={false} style={{ height: "100%", width: "100%", zIndex: 0 }}>
+          <MapContainer
+            center={window.innerWidth < 768 ? [20, 0] : [23, 72]}
+            zoom={window.innerWidth < 768 ? 2 : 5}
+            scrollWheelZoom={false}
+            style={{ height: "100%", width: "100%", zIndex: 0 }}
+          >
+            <TileLayer
+              attribution={theme === 'dark' ? '&copy; <a href="https://carto.com/">CartoDB</a>' : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}
+              url={theme === 'dark' 
+                ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"}
+            />
 
-          <TileLayer
-            attribution='&copy; <a href="https://carto.com/">CartoDB</a>'
-            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          />
+            <FitBounds shipments={shipments} />
 
-          <AutoCenter shipments={shipments} />
-          {/* STATIC TEST MARKER (STEP 1) */}
-          <Marker position={[23.0225, 72.5714]}>
-            <Popup>
-              <span className="text-gray-900 font-bold">India Base Station</span>
-            </Popup>
-          </Marker>
+            {shipments?.map((shipment) => {
+              const loc = shipment.current_location;
+              const hasValidLocation = loc && typeof loc.lat === "number" && typeof loc.lng === "number";
 
-          {/* DYNAMIC MARKERS & POLYLINES (STEP 2) */}
-          {shipments?.map(shipment => {
-            if (shipment.current_location && shipment.current_location.lat && shipment.current_location.lng) {
-              
-              const isHigh = shipment.risk?.current?.risk_level === 'high' || shipment.risk?.current?.risk_level === 'critical';
-              const isMed = shipment.risk?.current?.risk_level === 'medium';
-              const etaDelay = isHigh ? '+4h Delay' : isMed ? '+1.5h Delay' : 'On Time';
-              const delayClass = isHigh ? 'text-red-600 bg-red-100' : isMed ? 'text-yellow-600 bg-yellow-100' : 'text-green-600 bg-green-100';
-              
-              // Map Coordinate Mapping
-              const CITY_COORDS = {
-                Ahmedabad: [23.0225, 72.5714],
-                Mumbai: [19.0760, 72.8777],
-                Pune: [18.5204, 73.8567],
-                Delhi: [28.6139, 77.2090],
-                Jaipur: [26.9124, 75.7873],
-                Bangalore: [12.9716, 77.5946],
-                Chennai: [13.0827, 80.2707],
-                London: [51.5074, -0.1278],
-                Paris: [48.8566, 2.3522],
-                'New York': [40.7128, -74.0060],
-                'Los Angeles': [34.0522, -118.2437]
-              };
+              if (!hasValidLocation) return null;
 
-              let originKey = Object.keys(CITY_COORDS).find(k => (shipment.origin || '').toLowerCase().includes(k.toLowerCase()));
-              let destKey = Object.keys(CITY_COORDS).find(k => (shipment.destination || '').toLowerCase().includes(k.toLowerCase()));
-              
-              const routeOrigin = originKey ? CITY_COORDS[originKey] : null;
-              const routeDest = destKey ? CITY_COORDS[destKey] : null;
+              const riskLevel = shipment.risk?.current?.risk_level || "low";
+              const isHigh = riskLevel === "high" || riskLevel === "critical";
+              const isMed = riskLevel === "medium";
+
+              const etaDelay = isHigh ? "+4h Delay" : isMed ? "+1.5h Delay" : "On Time";
+              const delayClass = isHigh ? "text-danger bg-danger/10" : isMed ? "text-warning bg-warning/10" : "text-success bg-success/10";
+
+              const polylinePositions = shipment.route_waypoints?.filter(
+                (wp) => typeof wp.lat === "number" && typeof wp.lng === "number"
+              ).map((wp) => [wp.lat, wp.lng]) || [];
+
+              const isSelected = selectedId === shipment.id;
+              const opacity = selectedId && selectedId !== shipment.id ? 0.4 : 1;
 
               return (
                 <div key={shipment.id}>
-                {shipment.route_waypoints?.length > 1 && (
-                  <Polyline
-                    positions={shipment.route_waypoints.map(wp => [wp.lat, wp.lng])}
-                    pathOptions={{ color: isHigh ? "#ef4444" : isMed ? "#f97316" : "#22c55e", weight: 3, dashArray: "5, 10" }}
-                  />
-                )}
-                  
+                  {polylinePositions.length > 1 && (
+                    <Polyline
+                      positions={polylinePositions}
+                      pathOptions={{
+                        color: isSelected ? "#3b82f6" : isHigh ? "#ef4444" : isMed ? "#f97316" : "#22c55e",
+                        weight: isSelected ? 6 : 3,
+                        opacity: isSelected ? 1 : 0.25
+                      }}
+                    />
+                  )}
+
                   <Marker
-                    position={[shipment.current_location.lat, shipment.current_location.lng]}
-                    icon={getMarkerIcon(shipment.risk?.current?.risk_level)}
+                    position={[loc.lat, loc.lng]}
+                    icon={getMarkerIcon(riskLevel, isSelected, theme)}
+                    opacity={opacity}
+                    eventHandlers={{
+                      click: () => setSelectedId(prev => prev === shipment.id ? null : shipment.id),
+                    }}
                   >
+                    <Tooltip direction="top" offset={[0, -10]} opacity={1}>
+                      <div className="text-xs font-bold">
+                        🚚 {shipment.tracking_number}
+                        <br />
+                        <span className="text-[10px] opacity-70">
+                          {shipment.origin_name} → {shipment.destination_name}
+                        </span>
+                      </div>
+                    </Tooltip>
+
                     <Popup className="custom-popup border-0">
                       <div className="flex flex-col gap-1 min-w-[160px]">
-                        <strong className="text-gray-900 border-b border-gray-200 pb-1 mb-1 text-sm tracking-wide">{shipment.tracking_number}</strong>
-                        <span className="text-gray-600 text-[11px] font-bold uppercase tracking-wider text-primary-600">Route: {shipment.origin} → {shipment.destination}</span>
-                        
-                        <div className="flex justify-between items-center mt-1 pt-1 border-t border-gray-100 border-dashed">
-                          <span className={`font-bold uppercase tracking-wider text-[9px] px-2 py-0.5 rounded text-white shadow-sm ${
-                              isHigh ? 'bg-red-500' : isMed ? 'bg-yellow-500' : 'bg-green-500'
-                          }`}>
-                            Risk: {shipment.risk?.current?.risk_level || 'low'}
+                        <strong className="text-theme-primary border-b border-theme pb-1 mb-1 text-sm">
+                          {shipment.tracking_number}
+                        </strong>
+
+                        <span className="text-theme-secondary text-[11px] font-bold">
+                          Route: {shipment.origin_name} → {shipment.destination_name}
+                        </span>
+
+                        <div className="flex justify-between mt-1 pt-1 border-t border-theme border-dashed">
+                          <span
+                            className={`text-[9px] px-2 py-0.5 rounded text-white ${isHigh ? "bg-danger" : isMed ? "bg-warning" : "bg-success"}`}
+                          >
+                            Risk: {riskLevel}
                           </span>
-                          <span className={`font-mono text-[9px] font-bold px-1.5 py-0.5 rounded ${delayClass}`}>
+
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded ${delayClass}`}>
                             ETA: {etaDelay}
                           </span>
                         </div>
-                        
+
                         {shipment.risk?.current?.reason && (
-                          <div className="bg-red-50 mt-1.5 p-1.5 rounded border border-red-100 shadow-sm">
-                            <span className="text-red-700 text-[9px] font-bold uppercase tracking-wide leading-[1.1] block">
-                               ⚠️ {shipment.risk.current.reason}
-                            </span>
+                          <div className="bg-danger/10 mt-1 p-1 rounded border border-danger/20 text-danger text-[9px]">
+                            ⚠️ {shipment.risk.current.reason}
                           </div>
                         )}
                       </div>
@@ -264,10 +280,26 @@ const Dashboard = memo(function Dashboard() {
                   </Marker>
                 </div>
               );
-            }
-            return null;
-          })}
+            })}
           </MapContainer>
+
+          {/* 🔥 LIVE SUMMARY */}
+          <div className="absolute top-4 right-4 bg-theme-secondary/90 p-4 rounded-xl w-52 z-[1000] border border-theme text-xs shadow-lg">
+            <h3 className="font-bold mb-2 text-theme-primary">Live Status</h3>
+
+            {highRiskCount > 0 ? (
+              <p className="text-danger font-bold">
+                ⚠ {highRiskCount} shipment needs attention
+              </p>
+            ) : (
+              <p className="text-success">✔ All shipments running smoothly</p>
+            )}
+
+            <p className="mt-2 text-theme-secondary text-[11px]">
+              Total Active: {shipments.length}
+            </p>
+          </div>
+
         </div>
       </motion.div>
     </div>
@@ -275,3 +307,4 @@ const Dashboard = memo(function Dashboard() {
 });
 
 export default Dashboard;
+

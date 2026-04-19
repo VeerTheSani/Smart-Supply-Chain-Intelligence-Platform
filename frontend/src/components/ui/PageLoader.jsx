@@ -6,15 +6,15 @@ import LoadingSpinner from './LoadingSpinner';
  */
 const PageLoader = memo(function PageLoader() {
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-surface-950/80 backdrop-blur-sm z-50">
+    <div className="fixed inset-0 flex items-center justify-center bg-theme-primary/80 backdrop-blur-sm z-50">
       <div className="flex flex-col items-center gap-4">
         <div className="relative">
-          <div className="absolute inset-0 rounded-full bg-primary-500/20 animate-ping" />
-          <div className="relative glass rounded-full p-6">
+          <div className="absolute inset-0 rounded-full bg-accent/20 animate-ping" />
+          <div className="relative bg-theme-secondary rounded-full p-6 border border-theme shadow-xl">
             <LoadingSpinner size={32} />
           </div>
         </div>
-        <p className="text-surface-300 text-sm font-medium tracking-wide">
+        <p className="text-theme-secondary text-sm font-bold tracking-widest uppercase animate-pulse">
           Loading module...
         </p>
       </div>

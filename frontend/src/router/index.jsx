@@ -1,6 +1,6 @@
 import { lazy } from 'react';
 import { createBrowserRouter } from 'react-router-dom';
-import RootLayout from '../components/layout/RootLayout';
+import RootLayout from '../layouts/RootLayout';
 
 /**
  * Lazy-loaded page imports — React.lazy + Suspense for code splitting.

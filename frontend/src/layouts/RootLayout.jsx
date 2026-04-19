@@ -3,12 +3,12 @@ import { Outlet } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import Sidebar from './Sidebar';
 import Header from './Header';
-import { useUIStore } from '../../stores/uiStore';
-import LiveAlertPanel from '../ui/LiveAlertPanel';
-import { useAlertWebSocket } from '../../hooks/useAlertWebSocket';
+import { useUIStore } from '../stores/uiStore';
+import LiveAlertPanel from '../components/ui/LiveAlertPanel';
+import { useAlertWebSocket } from '../hooks/useAlertWebSocket';
 import { Toaster } from 'react-hot-toast';
-import { useShipments } from '../../hooks/useApi';
-import { useShipmentStore } from '../../stores/shipmentStore';
+import { useShipments } from '../hooks/useShipments';
+import { useShipmentStore } from '../stores/shipmentStore';
 /**
  * Root layout — sidebar + header + animated page content.
  * Content area shifts based on sidebar collapsed state.
@@ -30,7 +30,7 @@ const RootLayout = memo(function RootLayout() {
   }, [activeShipments, setShipments]);
 
   return (
-    <div className="min-h-screen bg-surface-950">
+    <div className="min-h-screen bg-theme-primary">
       <Toaster position="top-right" />
       <LiveAlertPanel />
       <Sidebar />

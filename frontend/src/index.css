@@ -1,54 +1,35 @@
 @import "tailwindcss";
+@import "./styles/theme.css";
 
 /* ============================================
    SMART SUPPLY CHAIN - DESIGN SYSTEM
    ============================================ */
 
 @theme {
-  /* Color Palette */
-  --color-primary-50: #eff6ff;
-  --color-primary-100: #dbeafe;
-  --color-primary-200: #bfdbfe;
-  --color-primary-300: #93c5fd;
-  --color-primary-400: #60a5fa;
-  --color-primary-500: #3b82f6;
-  --color-primary-600: #2563eb;
-  --color-primary-700: #1d4ed8;
-  --color-primary-800: #1e40af;
-  --color-primary-900: #1e3a8a;
+  /* Dynamic Theme Mapping */
+  --color-accent: var(--accent);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
 
-  --color-accent-400: #a78bfa;
-  --color-accent-500: #8b5cf6;
-  --color-accent-600: #7c3aed;
+  /* Semantic Mappings for legacy utility support */
+  --color-surface-primary: var(--bg-primary);
+  --color-surface-secondary: var(--bg-secondary);
+  --color-surface-tertiary: var(--bg-tertiary);
+  --color-theme-text: var(--text-primary);
+  --color-theme-text-alt: var(--text-secondary);
+  --color-theme-border: var(--border-color);
 
-  --color-success-400: #4ade80;
-  --color-success-500: #22c55e;
-  --color-success-600: #16a34a;
-
-  --color-warning-400: #facc15;
-  --color-warning-500: #eab308;
-  --color-warning-600: #ca8a04;
-
-  --color-danger-400: #f87171;
-  --color-danger-500: #ef4444;
-  --color-danger-600: #dc2626;
-
-  --color-surface-50: #f8fafc;
-  --color-surface-100: #f1f5f9;
-  --color-surface-200: #e2e8f0;
-  --color-surface-700: #334155;
-  --color-surface-800: #1e293b;
-  --color-surface-850: #172033;
-  --color-surface-900: #0f172a;
-  --color-surface-950: #020617;
-
+  /* Physical Tokens */
+  --radius-xl: var(--radius-lg);
+  --radius-lg: var(--radius-md);
+  
   /* Typography */
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
 
   /* Shadows */
-  --shadow-glow: 0 0 20px rgba(59, 130, 246, 0.15);
-  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
-  --shadow-card-hover: 0 4px 16px rgba(0, 0, 0, 0.2);
+  --shadow-glow: var(--shadow-md);
+  --shadow-card: var(--shadow-md);
 }
 
 /* ============================================
@@ -57,13 +38,13 @@
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--color-surface-700) transparent;
+  scrollbar-color: var(--border-color) transparent;
 }
 
 body {
   font-family: var(--font-sans);
-  background-color: var(--color-surface-950);
-  color: var(--color-surface-100);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -73,23 +54,17 @@ body {
    ============================================ */
 
 .glass {
-  background: rgba(15, 23, 42, 0.6);
+  background: var(--glass-bg);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(148, 163, 184, 0.1);
-}
-
-.glass-light {
-  background: rgba(30, 41, 59, 0.5);
-  backdrop-filter: blur(8px);
-  border: 1px solid rgba(148, 163, 184, 0.08);
+  border: 1px solid var(--glass-border);
 }
 
 .gradient-primary {
-  background: linear-gradient(135deg, var(--color-primary-600), var(--color-accent-600));
+  background: linear-gradient(135deg, var(--accent), #6366f1);
 }
 
 .gradient-text {
-  background: linear-gradient(135deg, var(--color-primary-400), var(--color-accent-400));
+  background: linear-gradient(135deg, var(--accent), #6366f1);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -100,13 +75,8 @@ body {
 }
 
 @keyframes shimmer {
-  0% {
-    transform: translateX(-100%);
-  }
-
-  100% {
-    transform: translateX(100%);
-  }
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
 }
 
 .shimmer {
@@ -123,21 +93,10 @@ body {
 }
 
 /* Risk level indicators */
-.risk-low {
-  color: var(--color-success-400);
-}
-
-.risk-medium {
-  color: var(--color-warning-400);
-}
-
-.risk-high {
-  color: var(--color-danger-400);
-}
-
-.risk-critical {
-  color: #f43f5e;
-}
+.risk-low { color: var(--success); }
+.risk-medium { color: var(--warning); }
+.risk-high { color: var(--danger); }
+.risk-critical { color: var(--danger); font-weight: bold; }
 
 /* Status badges */
 .status-dot {
@@ -148,17 +107,9 @@ body {
   animation: pulse 2s infinite;
 }
 
-.status-dot-active {
-  background-color: var(--color-success-400);
-}
-
-.status-dot-warning {
-  background-color: var(--color-warning-400);
-}
-
-.status-dot-danger {
-  background-color: var(--color-danger-400);
-}
+.status-dot-active { background-color: var(--success); }
+.status-dot-warning { background-color: var(--warning); }
+.status-dot-danger { background-color: var(--danger); }
 
 /* ============================================
    LEAFLET REAL-TIME MARKER ANIMATIONS

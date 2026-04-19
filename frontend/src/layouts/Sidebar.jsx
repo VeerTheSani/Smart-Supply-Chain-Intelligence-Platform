@@ -11,8 +11,8 @@ import {
   ChevronLeft,
   Zap,
 } from 'lucide-react';
-import { cn } from '../../lib/utils';
-import { useUIStore } from '../../stores/uiStore';
+import { cn } from '../lib/utils';
+import { useUIStore } from '../stores/uiStore';
 
 const NAV_ITEMS = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -34,14 +34,14 @@ const SidebarLink = memo(function SidebarLink({ item, collapsed }) {
       className={cn(
         'group flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200',
         isActive
-          ? 'bg-primary-600/15 text-primary-400 shadow-glow'
-          : 'text-surface-400 hover:text-surface-200 hover:bg-surface-800/50'
+          ? 'bg-accent/15 text-accent shadow-glow'
+          : 'text-theme-secondary hover:text-theme-primary hover:bg-theme-tertiary'
       )}
     >
       <Icon
         className={cn(
           'w-5 h-5 shrink-0 transition-colors',
-          isActive ? 'text-primary-400' : 'text-surface-500 group-hover:text-surface-300'
+          isActive ? 'text-accent' : 'text-theme-secondary group-hover:text-theme-primary'
         )}
       />
       <AnimatePresence mode="wait">
@@ -60,7 +60,7 @@ const SidebarLink = memo(function SidebarLink({ item, collapsed }) {
       {isActive && !collapsed && (
         <motion.div
           layoutId="sidebar-active"
-          className="ml-auto w-1.5 h-1.5 rounded-full bg-primary-400"
+          className="ml-auto w-1.5 h-1.5 rounded-full bg-accent"
           transition={{ type: 'spring', stiffness: 300, damping: 30 }}
         />
       )}
@@ -79,10 +79,10 @@ const Sidebar = memo(function Sidebar() {
       initial={false}
       animate={{ width: collapsed ? 72 : 256 }}
       transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-      className="fixed left-0 top-0 bottom-0 z-40 flex flex-col glass border-r border-surface-800/50"
+      className="fixed left-0 top-0 bottom-0 z-40 flex flex-col glass-panel border-r border-theme"
     >
       {/* Logo */}
-      <div className="flex items-center gap-3 px-4 h-16 border-b border-surface-800/50">
+      <div className="flex items-center gap-3 px-4 h-16 border-b border-theme">
         <div className="w-8 h-8 rounded-lg gradient-primary flex items-center justify-center shrink-0">
           <Zap className="w-4 h-4 text-white" />
         </div>
@@ -98,7 +98,7 @@ const Sidebar = memo(function Sidebar() {
               <h1 className="text-sm font-bold gradient-text whitespace-nowrap">
                 Smart Supply Chain
               </h1>
-              <p className="text-[10px] text-surface-500 whitespace-nowrap">
+              <p className="text-[10px] text-theme-secondary whitespace-nowrap">
                 Real-Time Intelligence
               </p>
             </motion.div>
@@ -114,11 +114,11 @@ const Sidebar = memo(function Sidebar() {
       </nav>
 
       {/* Collapse Toggle */}
-      <div className="px-3 py-3 border-t border-surface-800/50">
+      <div className="px-3 py-3 border-t border-theme">
         <button
           onClick={toggleSidebar}
           className="w-full flex items-center justify-center p-2 rounded-xl 
-                     text-surface-500 hover:text-surface-300 hover:bg-surface-800/50 
+                     text-theme-secondary hover:text-theme-primary hover:bg-theme-tertiary 
                      transition-colors cursor-pointer"
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >

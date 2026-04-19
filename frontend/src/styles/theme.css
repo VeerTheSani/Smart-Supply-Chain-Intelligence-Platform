@@ -1,0 +1,120 @@
+/* ============================================
+   SMART SUPPLY CHAIN - CENTRAL THEME CONTROL
+   ============================================ */
+
+:root {
+  /* LIGHT THEME TOKENS */
+  --bg-primary: #f8fafc;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f1f5f9;
+
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+
+  --border-color: #e2e8f0;
+
+  --accent: #3b82f6;
+  --accent-glow: rgba(59, 130, 246, 0.15);
+  --success: #22c55e;
+  --warning: #facc15;
+  --danger: #ef4444;
+
+  /* PHYSICAL TOKENS */
+  --radius-lg: 16px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.12);
+  --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.12);
+  --card-padding: 1.5rem;
+  
+  /* GLASSMORPHISM - LIGHT */
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-border: rgba(203, 213, 225, 0.3);
+}
+
+.dark {
+  /* DARK THEME TOKENS */
+  --bg-primary: #020617;
+  --bg-secondary: #0f172a;
+  --bg-tertiary: #1e293b;
+
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+
+  --border-color: #1e293b;
+
+  --accent: #3b82f6;
+  --accent-glow: rgba(59, 130, 246, 0.25);
+  --success: #22c55e;
+  --warning: #facc15;
+  --danger: #ff5555;
+
+  /* GLASSMORPHISM - DARK */
+  --glass-bg: rgba(15, 23, 42, 0.7);
+  --glass-border: rgba(148, 163, 184, 0.1);
+  --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+/* ============================================
+   GLOBAL TRANSITIONS
+   ============================================ */
+* {
+  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease, box-shadow 0.25s ease;
+}
+
+/* ============================================
+   BASE STYLES
+   ============================================ */
+body {
+  background-color: var(--bg-primary, #020617);
+  color: var(--text-primary, #f8fafc);
+}
+
+/* ============================================
+   SEMANTIC UTILITIES
+   ============================================ */
+.bg-theme-primary { background-color: var(--bg-primary, #020617); }
+.bg-theme-secondary { background-color: var(--bg-secondary, #0f172a); }
+.bg-theme-tertiary { background-color: var(--bg-tertiary, #1e293b); }
+
+.text-theme-primary { color: var(--text-primary, #f8fafc); }
+.text-theme-secondary { color: var(--text-secondary, #94a3b8); }
+
+.border-theme { border-color: var(--border-color, #1e293b); }
+
+.bg-accent { background-color: var(--accent, #3b82f6); }
+.text-accent { color: var(--accent, #3b82f6); }
+
+.glass-panel {
+  background-color: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-md);
+}
+
+.card-standard {
+  background-color: var(--bg-secondary);
+  border-radius: var(--radius-lg);
+  padding: var(--card-padding);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-md);
+}
+
+/* LEAFLET OVERRIDES */
+.leaflet-popup-content-wrapper {
+  background-color: var(--bg-secondary) !important;
+  color: var(--text-primary) !important;
+  border-radius: var(--radius-md) !important;
+}
+
+.leaflet-popup-tip {
+  background-color: var(--bg-secondary) !important;
+}
+
+.leaflet-tooltip {
+  background-color: var(--bg-secondary) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: var(--radius-sm) !important;
+}
