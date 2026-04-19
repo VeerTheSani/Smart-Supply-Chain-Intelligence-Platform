@@ -225,17 +225,12 @@ const Dashboard = memo(function Dashboard() {
 
               return (
                 <div key={shipment.id}>
-                  {routeOrigin && routeDest && (
-                    <Polyline
-                      positions={[routeOrigin, routeDest]}
-                      pathOptions={{
-                        color: isHigh ? "#ef4444" : isMed ? "#f97316" : "#22c55e",
-                        weight: 3,
-                        opacity: 0.7,
-                        dashArray: "5, 10"
-                      }}
-                    />
-                  )}
+                {shipment.route_waypoints?.length > 1 && (
+                  <Polyline
+                    positions={shipment.route_waypoints.map(wp => [wp.lat, wp.lng])}
+                    pathOptions={{ color: isHigh ? "#ef4444" : isMed ? "#f97316" : "#22c55e", weight: 3, dashArray: "5, 10" }}
+                  />
+                )}
                   
                   <Marker
                     position={[shipment.current_location.lat, shipment.current_location.lng]}
