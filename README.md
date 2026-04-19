@@ -213,7 +213,7 @@ Final Score = (Weather × 35%) + (Traffic × 20%) + (Events × 25%)
 |--------|--------|-----------------|
 | Weather | Open-Meteo | Rain, wind, visibility at each waypoint at truck's arrival time |
 | Traffic | Mappls | Live duration vs free-flow ratio |
-| Events | Gemini 2.0 Flash + Google Search | Strikes, protests, road closures along route |
+| Events | Gemini 2.5 Flash + Google Search | Strikes, protests, road closures along route |
 | Time Buffer | Calculated | Elapsed time vs expected ETA |
 | Historical | MongoDB | Past alerts on this route |
 
