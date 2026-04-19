@@ -106,7 +106,7 @@ Create Shipment → Geocode → Mappls Route → Risk Engine → WebSocket Alert
 | Real-time | WebSockets + APScheduler |
 | Routing | Mappls (MapmyIndia) API |
 | Weather | Open-Meteo (free, no key) |
-| Events | Gemini 2.0 Flash + Google Search grounding |
+| Events | Gemini 2.5 Flash + Google Search grounding |
 | Geocoding | Nominatim (free, no key) |
 
 ---
