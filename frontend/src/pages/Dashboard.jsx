@@ -11,6 +11,7 @@ import L from 'leaflet';
 import icon from 'leaflet/dist/images/marker-icon.png';
 import iconShadow from 'leaflet/dist/images/marker-shadow.png';
 import { useEffect, useState } from "react";
+import RoadRoute from '../components/ui/RoadRoute'
 
 
 let DefaultIcon = L.icon({
@@ -219,14 +220,10 @@ const Dashboard = memo(function Dashboard() {
 
               return (
                 <div key={shipment.id}>
-                  {polylinePositions.length > 1 && (
-                    <Polyline
-                      positions={polylinePositions}
-                      pathOptions={{
-                        color: isSelected ? "#3b82f6" : isHigh ? "#ef4444" : isMed ? "#f97316" : "#22c55e",
-                        weight: isSelected ? 6 : 3,
-                        opacity: isSelected ? 1 : 0.25
-                      }}
+                  {shipment.route_waypoints?.length > 1 && (
+                    <RoadRoute
+                      waypoints={shipment.route_waypoints}
+                      color={isSelected ? "#3b82f6" : isHigh ? "#ef4444" : isMed ? "#f97316" : "#22c55e"}
                     />
                   )}
 

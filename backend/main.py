@@ -28,13 +28,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-from routers import shipments, risk, reroute, websocket, dashboard
+from routers import shipments, risk, reroute, websocket, dashboard, incidents
 
 app.include_router(dashboard.router)
 app.include_router(shipments.router)
 app.include_router(risk.router)
 app.include_router(reroute.router)
 app.include_router(websocket.router)
+app.include_router(incidents.router)
+
 
 
 @app.get("/")

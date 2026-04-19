@@ -134,3 +134,11 @@ body {
 
 .marker-pulse-high { animation: marker-pulse-red 1.5s infinite; }
 .marker-pulse-medium { animation: marker-pulse-yellow 2s infinite; }
+
+.hidden-routing-panel {
+  display: none !important;
+}
+
+.leaflet-routing-container {
+  display: none !important;
+}
