@@ -76,15 +76,13 @@ const Shipments = memo(function Shipments() {
                 </tr>
               ) : (
                 shipments?.map((shipment) => {
-                  const hasHighRisk = shipments.some(s => s.risk?.current?.risk_level === 'high' || s.risk?.current?.risk_level === 'critical');
-                  const isDemoTarget = shipment.tracking_number === shipments[0]?.tracking_number;
-                  
-                  const riskLevel = (!hasHighRisk && isDemoTarget) ? 'high' : (shipment.risk?.current?.risk_level || 'low');
-                  const riskScore = (!hasHighRisk && isDemoTarget) ? 85 : (shipment.risk?.current?.risk_score || 0);
+                  const riskLevel = shipment.risk?.current?.risk_level || 'low';
+                  const riskScore = shipment.risk?.current?.risk_score  || 0;
                   
                   const isSafe = riskLevel === 'low';
                   const isWarning = riskLevel === 'medium';
                   const isCritical = riskLevel === 'high' || riskLevel === 'critical';
+
 
                   return (
                     <tr 
