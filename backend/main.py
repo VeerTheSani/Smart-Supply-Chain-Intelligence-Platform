@@ -41,4 +41,4 @@ app.include_router(incidents.router)
 
 @app.get("/")
 async def root():
-    return {"status": "ok", "message": "Smart Supply Chain API is running"}
+    return {"status": "ok", "message": "Smart Supply Chain API is running bruhhh"}

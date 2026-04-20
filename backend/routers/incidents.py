@@ -31,7 +31,11 @@
 #   Incidents change every few minutes — a cleared accident should disappear
 #   from the map immediately. Storing would mean stale data.
 #   Fresh API call every time = always accurate.
+import os
+from dotenv import load_dotenv
+load_dotenv()
 
+TOMTOM_KEY = os.getenv("TOMTOM_KEY")
 import logging
 import math
 
@@ -40,7 +44,6 @@ from bson.errors import InvalidId
 from fastapi import APIRouter, HTTPException
 
 from database import db
-from services.mappls_service import get_token
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -100,56 +103,65 @@ def _is_on_route(incident_lat: float, incident_lng: float, waypoints: list[dict]
     return False
 
 
+TOMTOM_CATEGORIES = {
+    1: "UNKNOWN",
+    2: "ACCIDENT",
+    3: "HAZARD",
+    4: "DANGEROUS_CONDITIONS",
+    5: "RAIN",
+    6: "ROAD_HAZARD",      #
+    7: "JAM",
+    8: "LANE_CLOSED",
+    9: "ROAD_CLOSED",
+    10: "ROAD_WORKS",
+    11: "HIGH_WINDS",
+    12: "FLOODING",
+    13: "BROKEN_DOWN_VEHICLE",
+}
+
 def _parse_incidents(raw: list[dict], waypoints: list[dict]) -> list[dict]:
-    """
-    Parse Mappls incident response and filter to route-only incidents.
-
-    Mappls returns incidents with varying field names depending on API version.
-    We normalize to a clean shape: {lat, lng, type, severity, description}
-
-    Incident types from Mappls: ACCIDENT, ROAD_CLOSED, CONSTRUCTION,
-                                  LANE_RESTRICTION, HAZARD, WEATHER
-    Severity: 0=unknown, 1=minor, 2=moderate, 3=major, 4=critical
-    """
     result = []
+    seen = set()  # prevent duplicates
 
     for item in raw:
-        # Mappls can nest coords differently — handle both shapes
-        # Shape 1: item["geometry"]["coordinates"] = [lng, lat]  (GeoJSON)
-        # Shape 2: item["lat"], item["lng"]  (flat)
         try:
-            if "geometry" in item:
-                coords = item["geometry"]["coordinates"]
-                lng, lat = float(coords[0]), float(coords[1])
-            else:
-                lat = float(item.get("lat", 0))
-                lng = float(item.get("lng", 0))
-        except (KeyError, IndexError, TypeError, ValueError):
-            continue  # skip malformed entries
+            props = item.get("properties", item)
+            geometry = item.get("geometry", {})
+            coords = geometry.get("coordinates", [])
+
+            if not coords:
+                continue
+
+            # TomTom LineString — use first coordinate as incident position
+            # coordinates are [lng, lat] in GeoJSON format
+            first = coords[0]
+            lng, lat = float(first[0]), float(first[1])
+
+        except (IndexError, TypeError, ValueError):
+            continue
 
         if lat == 0 and lng == 0:
-            continue  # skip null coordinates
+            continue
 
-        # Only keep if it's actually on our route
+        # Deduplicate by rounding to 3 decimal places (~100m)
+        key = (round(lat, 3), round(lng, 3))
+        if key in seen:
+            continue
+        seen.add(key)
+
         if not _is_on_route(lat, lng, waypoints):
             continue
 
-        # Normalize type — Mappls uses different field names
-        incident_type = (
-            item.get("type")
-            or item.get("incidentType")
-            or item.get("incident_type")
-            or "UNKNOWN"
-        ).upper()
+        category = props.get("iconCategory", 1)
+        incident_type = TOMTOM_CATEGORIES.get(category, "UNKNOWN")
 
-        # Normalize severity to int 0-4
-        severity = int(item.get("severity", item.get("severityLevel", 0)) or 0)
+        # Only show relevant ones — skip lane closures and minor stuff
+        if incident_type in ("UNKNOWN", "LANE_CLOSED"):
+            continue
 
-        # Normalize description
         description = (
-            item.get("description")
-            or item.get("shortDescription")
-            or item.get("title")
+            props.get("description")
+            or props.get("shortDescription")
             or incident_type.replace("_", " ").title()
         )
 
@@ -157,22 +169,16 @@ def _parse_incidents(raw: list[dict], waypoints: list[dict]) -> list[dict]:
             "lat":         lat,
             "lng":         lng,
             "type":        incident_type,
-            "severity":    severity,
+            "severity":    props.get("magnitudeOfDelay", 0),
             "description": description,
         })
 
     return result
 
-
 @router.get("/{id}/incidents")
 async def get_route_incidents(id: str):
-    """
-    Get live traffic incidents along a shipment's route.
-    Returns only incidents within 5km of the route — not the whole region.
-    Called by the frontend when a shipment is selected on the map.
-    """
 
-    # Step 1 — Load shipment from MongoDB
+    # Step 1 — Load shipment
     try:
         oid = ObjectId(id)
     except (InvalidId, Exception):
@@ -183,70 +189,58 @@ async def get_route_incidents(id: str):
         raise HTTPException(status_code=404, detail="Shipment not found")
 
     waypoints = shipment.get("route_waypoints", [])
+    print(f"Waypoints count: {len(waypoints)}") 
     if len(waypoints) < 2:
-        # No route stored — return empty, not an error
         return {"incidents": [], "count": 0, "message": "No route data available"}
 
-    # Step 2 — Build bounding box from waypoints
-    lng_min, lat_min, lng_max, lat_max = _build_bbox(waypoints)
-    bbox_str = f"{lng_min:.4f},{lat_min:.4f},{lng_max:.4f},{lat_max:.4f}"
+    # Step 2 — Call TomTom per segment
+    all_raw_incidents = []
 
-    logger.info(f"Fetching incidents for shipment {id} | bbox={bbox_str} | {len(waypoints)} waypoints")
+    for i in range(len(waypoints) - 1):
+        chunk = waypoints[i:i+2]
+        lats = [wp["lat"] for wp in chunk]
+        lngs = [wp["lng"] for wp in chunk]
+        pad = 0.1
+        bbox_str = (
+            f"{min(lngs)-pad:.4f},{min(lats)-pad:.4f},"
+            f"{max(lngs)+pad:.4f},{max(lats)+pad:.4f}"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                url = (
+                    f"https://api.tomtom.com/traffic/services/5/incidentDetails"
+                    f"?key={TOMTOM_KEY}"
+                    f"&bbox={bbox_str}"
+                    f"&language=en-GB"
+                    f"&zoom=10"
+                )
+                resp = await client.get(url)
+                print(f"TomTom segment {i}: status={resp.status_code} | {resp.text[:200]}")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    print(f"TomTom segment {i}: {data}")
+                    raw = (
+                        data.get("incidentFeatures")
+                        or data.get("incidents")
+                        or data.get("features")
+                        or []
+                    )
+                    all_raw_incidents.extend(raw)
+        except Exception as e:
+            print(f"TomTom segment {i} ERROR: {type(e).__name__}: {e}")
+            continue
 
-    # Step 3 — Call Mappls Traffic Incidents API
-    try:
-        token = await get_token()
-
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://apis.mappls.com/advancedmaps/v1/traffic_incidents",
-                params={"bbox": bbox_str},
-                headers={"Authorization": f"Bearer {token}"},
-            )
-
-            if resp.status_code == 404:
-                # No incidents in area — totally normal
-                return {"incidents": [], "count": 0}
-
-            if resp.status_code == 401:
-                raise HTTPException(status_code=503, detail="Mappls auth failed")
-
-            resp.raise_for_status()
-            data = resp.json()
-
-    except httpx.TimeoutException:
-        logger.warning(f"Mappls incidents timeout for shipment {id}")
-        return {"incidents": [], "count": 0, "message": "Incidents API timed out"}
-
-    except HTTPException:
-        raise
-
-    except Exception as e:
-        logger.error(f"Mappls incidents API error for {id}: {e}")
-        return {"incidents": [], "count": 0, "message": "Could not fetch incidents"}
-
-    # Step 4 — Parse response, handle both GeoJSON and flat shapes
-    raw_incidents = (
-        data.get("incidentFeatures")
-        or data.get("incidents")
-        or data.get("features")
-        or []
-    )
-
-    # GeoJSON FeatureCollection — actual data is in item["properties"]
-    if raw_incidents and "properties" in (raw_incidents[0] if raw_incidents else {}):
-        raw_incidents = [
+    # Step 3 — Parse + filter to corridor
+    
+    if all_raw_incidents and "properties" in (all_raw_incidents[0] if all_raw_incidents else {}):
+        all_raw_incidents = [
             {**item.get("properties", {}), "geometry": item.get("geometry")}
-            for item in raw_incidents
+            for item in all_raw_incidents
         ]
 
-    # Step 5 — Filter to corridor + normalize shape
-    filtered = _parse_incidents(raw_incidents, waypoints)
+    filtered = _parse_incidents(all_raw_incidents, waypoints)
 
-    logger.info(
-        f"Incidents for {id}: {len(raw_incidents)} from Mappls → "
-        f"{len(filtered)} on route (within {CORRIDOR_KM}km)"
-    )
+    logger.info(f"Incidents for {id}: {len(all_raw_incidents)} from TomTom → {len(filtered)} on route")
 
     return {
         "shipment_id": id,
@@ -254,3 +248,4 @@ async def get_route_incidents(id: str):
         "count":       len(filtered),
         "corridor_km": CORRIDOR_KM,
     }
+
