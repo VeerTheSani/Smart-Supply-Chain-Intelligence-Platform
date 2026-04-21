@@ -20,7 +20,7 @@
 #      Mappls returns everything in the rectangle — could include stuff
 #      far from the actual road (parallel highway, nearby city etc)
 #
-#   4. Filter: keep only incidents within CORRIDOR_KM (5km) of any waypoint
+#   4. Filter: keep only incidents within CORRIDOR_KM (2km avtuallly i have vhnage it ojoisvbjawsiosjbwsio;bn) of any waypoint
 #      This ensures we only show incidents that are actually ON our route,
 #      not random accidents 30km away in the same bounding box
 #
@@ -38,6 +38,7 @@ load_dotenv()
 TOMTOM_KEY = os.getenv("TOMTOM_KEY")
 import logging
 import math
+import asyncio
 
 from bson import ObjectId
 from bson.errors import InvalidId
@@ -51,7 +52,7 @@ router = APIRouter(prefix="/api/shipments", tags=["incidents"])
 
 # How close an incident must be to a waypoint to count as "on our route"
 # 5km catches incidents on the same road without picking up parallel highways
-CORRIDOR_KM = 5.0
+CORRIDOR_KM = 2.0
 
 # Small padding added to bounding box so incidents right at route edges aren't missed
 BBOX_PADDING = 0.5  # degrees (~55km) — intentionally generous, corridor filter tightens it
@@ -189,47 +190,51 @@ async def get_route_incidents(id: str):
         raise HTTPException(status_code=404, detail="Shipment not found")
 
     waypoints = shipment.get("route_waypoints", [])
-    print(f"Waypoints count: {len(waypoints)}") 
     if len(waypoints) < 2:
         return {"incidents": [], "count": 0, "message": "No route data available"}
 
     # Step 2 — Call TomTom per segment
     all_raw_incidents = []
 
-    for i in range(len(waypoints) - 1):
-        chunk = waypoints[i:i+2]
-        lats = [wp["lat"] for wp in chunk]
-        lngs = [wp["lng"] for wp in chunk]
-        pad = 0.1
-        bbox_str = (
-            f"{min(lngs)-pad:.4f},{min(lats)-pad:.4f},"
-            f"{max(lngs)+pad:.4f},{max(lats)+pad:.4f}"
-        )
+    async def fetch_one(session, bbox_str):
         try:
-            async with httpx.AsyncClient(timeout=8.0) as client:
-                url = (
-                    f"https://api.tomtom.com/traffic/services/5/incidentDetails"
-                    f"?key={TOMTOM_KEY}"
-                    f"&bbox={bbox_str}"
-                    f"&language=en-GB"
-                    f"&zoom=10"
+            url = (
+                f"https://api.tomtom.com/traffic/services/5/incidentDetails"
+                f"?key={TOMTOM_KEY}&bbox={bbox_str}&language=en-GB&zoom=10"
+            )
+            resp = await session.get(url)
+            if resp.status_code == 200:
+                data = resp.json()
+                return (
+                    data.get("features")
+                    or data.get("incidentFeatures")
+                    or data.get("incidents")
+                    or []
                 )
-                resp = await client.get(url)
-                print(f"TomTom segment {i}: status={resp.status_code} | {resp.text[:200]}")
-                if resp.status_code == 200:
-                    data = resp.json()
-                    print(f"TomTom segment {i}: {data}")
-                    raw = (
-                        data.get("incidentFeatures")
-                        or data.get("incidents")
-                        or data.get("features")
-                        or []
-                    )
-                    all_raw_incidents.extend(raw)
-        except Exception as e:
-            print(f"TomTom segment {i} ERROR: {type(e).__name__}: {e}")
-            continue
+        except Exception:
+            pass
+        return []
 
+    async with httpx.AsyncClient(timeout=8.0) as client:
+        # Build all bbox strings first
+        bboxes = []
+        for i in range(len(waypoints) - 1):
+            chunk = waypoints[i:i+2]
+            lats = [wp["lat"] for wp in chunk]
+            lngs = [wp["lng"] for wp in chunk]
+            pad = 0.1
+            bboxes.append(
+                f"{min(lngs)-pad:.4f},{min(lats)-pad:.4f},"
+                f"{max(lngs)+pad:.4f},{max(lats)+pad:.4f}"
+            )
+
+        # Run in batches of 5 — fast enough, won't hit rate limit
+        BATCH_SIZE = 10
+        for i in range(0, len(bboxes), BATCH_SIZE):
+            batch = bboxes[i:i+BATCH_SIZE]
+            results = await asyncio.gather(*[fetch_one(client, b) for b in batch])
+            for r in results:
+                all_raw_incidents.extend(r)
     # Step 3 — Parse + filter to corridor
     
     if all_raw_incidents and "properties" in (all_raw_incidents[0] if all_raw_incidents else {}):
