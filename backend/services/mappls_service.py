@@ -1,7 +1,5 @@
 # services/mappls_service.py
-# Replaces both geocoding_service.py and ors_service.py
 # Uses Mappls (MapmyIndia) for:
-#   - Geocoding (place name → coordinates)
 #   - Routing (coordinates → waypoints every 50km)
 #   - Real-time traffic (duration with traffic vs without)
 
@@ -199,6 +197,7 @@ async def get_route(
 
     result = {
         "waypoints":                   _extract_waypoints_every_50km(coordinates),
+        "geometry_encoded":            primary.get("geometry", ""),
         "distance_km":                 round(primary.get("distance", 0) / 1000, 2),
         "duration_seconds":            duration_with,
         "duration_no_traffic_seconds": duration_no_traffic,

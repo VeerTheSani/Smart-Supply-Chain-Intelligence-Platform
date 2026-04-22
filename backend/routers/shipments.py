@@ -12,7 +12,6 @@ from database import db
 from models import ShipmentCreate, ShipmentUpdate
 from services.geocoding_service import geocode
 from services.mappls_service import get_route
-from services.segment_service import get_named_waypoints
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/shipments", tags=["shipments"])
@@ -110,7 +109,6 @@ async def create_shipment(data: ShipmentCreate):
     dest_coords   = {"lat": dest_geo["lat"],   "lng": dest_geo["lng"]}
 
     route_waypoints      = []
-    named_waypoints      = []
     road_names           = []
     distance_km          = None
     expected_travel_secs = None
@@ -121,6 +119,7 @@ async def create_shipment(data: ShipmentCreate):
         route_waypoints = route["waypoints"]
         distance_km     = route["distance_km"]
         road_names      = route.get("road_names", [])
+        geometry_encoded = route.get("geometry_encoded", "")
 
         duration_with    = route["duration_seconds"]
         duration_without = route.get("duration_no_traffic_seconds", duration_with)
@@ -128,7 +127,7 @@ async def create_shipment(data: ShipmentCreate):
         expected_travel_secs = int(duration_with * 1.35) if duration_with == duration_without else duration_with
         eta_hours = round(expected_travel_secs / 3600, 2)
 
-        named_waypoints = await get_named_waypoints(route_waypoints)
+
 
     except RuntimeError as e:
         logger.warning(f"Route fetch failed for {data.origin_name}→{data.destination_name}: {e}")
@@ -147,6 +146,7 @@ async def create_shipment(data: ShipmentCreate):
         "destination_name":      data.destination_name,
         "destination_resolved":  dest_geo["display_name"],
         "destination_coords":    dest_coords,
+        "route_geometry_encoded": geometry_encoded, 
 
         # Frontend compatibility fields (her schema)
         "tracking_number":       tracking_number,
@@ -160,11 +160,11 @@ async def create_shipment(data: ShipmentCreate):
         # so setting None means the shipment never appears until scheduler runs (5 min).
         "current_location":          origin_coords,
         "route_waypoints":           route_waypoints,
-        "named_waypoints":           named_waypoints,
         "road_names":                road_names,
         "distance_km":               distance_km,
         "expected_travel_seconds":   expected_travel_secs,
         "eta_hours":                 eta_hours,
+        
 
         # Config
         "status":               "planned",

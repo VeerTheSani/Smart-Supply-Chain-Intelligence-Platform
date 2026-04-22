@@ -46,13 +46,14 @@ from fastapi import APIRouter, HTTPException
 
 from database import db
 import httpx
+from services.mappls_service import _decode_polyline
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/shipments", tags=["incidents"])
 
 # How close an incident must be to a waypoint to count as "on our route"
 # 5km catches incidents on the same road without picking up parallel highways
-CORRIDOR_KM = 2.0
+CORRIDOR_KM = 0.1
 
 # Small padding added to bounding box so incidents right at route edges aren't missed
 BBOX_PADDING = 0.5  # degrees (~55km) — intentionally generous, corridor filter tightens it
@@ -92,17 +93,34 @@ def _build_bbox(waypoints: list[dict]) -> tuple[float, float, float, float]:
     )
 
 
+
+def _dist_to_segment_km(
+    lat: float, lng: float,
+    lat1: float, lng1: float,
+    lat2: float, lng2: float,
+) -> float:
+    """Perpendicular distance from a point to a line segment in km."""
+    dx = lat2 - lat1
+    dy = lng2 - lng1
+    if dx == 0 and dy == 0:
+        return _haversine_km(lat, lng, lat1, lng1)
+    t = ((lat - lat1) * dx + (lng - lng1) * dy) / (dx * dx + dy * dy)
+    t = max(0.0, min(1.0, t))
+    return _haversine_km(lat, lng, lat1 + t * dx, lng1 + t * dy)
+
+
 def _is_on_route(incident_lat: float, incident_lng: float, waypoints: list[dict]) -> bool:
-    """
-    Check if an incident is within CORRIDOR_KM of ANY waypoint on the route.
-    If yes it's on our road. If no it's somewhere else in the bbox, ignore it.
-    """
-    for wp in waypoints:
-        dist = _haversine_km(incident_lat, incident_lng, wp["lat"], wp["lng"])
+    """Check if incident is within CORRIDOR_KM of any route SEGMENT (not just points)."""
+    for i in range(len(waypoints) - 1):
+        w1, w2 = waypoints[i], waypoints[i + 1]
+        dist = _dist_to_segment_km(
+            incident_lat, incident_lng,
+            w1["lat"], w1["lng"],
+            w2["lat"], w2["lng"],
+        )
         if dist <= CORRIDOR_KM:
             return True
     return False
-
 
 TOMTOM_CATEGORIES = {
     1: "UNKNOWN",
@@ -119,24 +137,31 @@ TOMTOM_CATEGORIES = {
     12: "FLOODING",
     13: "BROKEN_DOWN_VEHICLE",
 }
-
 def _parse_incidents(raw: list[dict], waypoints: list[dict]) -> list[dict]:
     result = []
-    seen = set()  # prevent duplicates
+    seen = set()
 
     for item in raw:
         try:
             props = item.get("properties", item)
             geometry = item.get("geometry", {})
             coords = geometry.get("coordinates", [])
+            geo_type = geometry.get("type", "")
 
             if not coords:
                 continue
 
-            # TomTom LineString — use first coordinate as incident position
-            # coordinates are [lng, lat] in GeoJSON format
-            first = coords[0]
-            lng, lat = float(first[0]), float(first[1])
+            # Handle both Point [lng, lat] and LineString [[lng, lat], ...]
+            if geo_type == "Point":
+                lng, lat = float(coords[0]), float(coords[1])
+            else:
+                # LineString — first coord
+                first = coords[0]
+                if isinstance(first, (list, tuple)):
+                    lng, lat = float(first[0]), float(first[1])
+                else:
+                    # Flat array fallback
+                    lng, lat = float(coords[0]), float(coords[1])
 
         except (IndexError, TypeError, ValueError):
             continue
@@ -144,7 +169,6 @@ def _parse_incidents(raw: list[dict], waypoints: list[dict]) -> list[dict]:
         if lat == 0 and lng == 0:
             continue
 
-        # Deduplicate by rounding to 3 decimal places (~100m)
         key = (round(lat, 3), round(lng, 3))
         if key in seen:
             continue
@@ -156,7 +180,6 @@ def _parse_incidents(raw: list[dict], waypoints: list[dict]) -> list[dict]:
         category = props.get("iconCategory", 1)
         incident_type = TOMTOM_CATEGORIES.get(category, "UNKNOWN")
 
-        # Only show relevant ones — skip lane closures and minor stuff
         if incident_type in ("UNKNOWN", "LANE_CLOSED"):
             continue
 
@@ -190,6 +213,13 @@ async def get_route_incidents(id: str):
         raise HTTPException(status_code=404, detail="Shipment not found")
 
     waypoints = shipment.get("route_waypoints", [])
+
+    encoded = shipment.get("route_geometry_encoded", "")
+    if encoded:
+        raw_coords = _decode_polyline(encoded)  # [[lng, lat], ...]
+        dense_points = [{"lat": c[1], "lng": c[0]} for c in raw_coords]
+    else:
+        dense_points = waypoints 
     if len(waypoints) < 2:
         return {"incidents": [], "count": 0, "message": "No route data available"}
 
@@ -222,7 +252,7 @@ async def get_route_incidents(id: str):
             chunk = waypoints[i:i+2]
             lats = [wp["lat"] for wp in chunk]
             lngs = [wp["lng"] for wp in chunk]
-            pad = 0.1
+            pad = 0.03
             bboxes.append(
                 f"{min(lngs)-pad:.4f},{min(lats)-pad:.4f},"
                 f"{max(lngs)+pad:.4f},{max(lats)+pad:.4f}"
@@ -243,7 +273,7 @@ async def get_route_incidents(id: str):
             for item in all_raw_incidents
         ]
 
-    filtered = _parse_incidents(all_raw_incidents, waypoints)
+    filtered = _parse_incidents(all_raw_incidents, dense_points)
 
     logger.info(f"Incidents for {id}: {len(all_raw_incidents)} from TomTom → {len(filtered)} on route")
 

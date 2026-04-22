@@ -13,46 +13,6 @@ NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
 HEADERS = {"User-Agent": "SmartSupplyChain/1.0"}
 
 
-async def _reverse_geocode(lat: float, lng: float) -> str:
-    """
-    Convert a coordinate to the nearest city/town name.
-    Returns city name string, or None on failure.
-    """
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                NOMINATIM_URL,
-                params={
-                    "lat": lat,
-                    "lon": lng,
-                    "format": "json",
-                    "zoom": 7,        
-                    "addressdetails": 1,
-                },
-                headers=HEADERS,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-
-        address = data.get("address", {})
-
-        # I am trying to get something out of this if not this, then this, we can go deep down as much as we want right veer?
-        name = (
-           address.get("city") or
-           address.get("town") or
-           address.get("suburb") or
-           address.get("district") or
-           address.get("village") or
-           address.get("county") or
-           address.get("state_district") or
-           data.get("display_name", "").split(",")[0]
-        )
-        return name.strip() if name else None
-
-    except Exception as e:
-        logger.warning(f"Reverse geocode failed for ({lat}, {lng}): {e}")
-        return None
-
 
 async def get_named_waypoints(waypoints: list[dict]) -> list[dict]:
     """

@@ -4,10 +4,10 @@ import math
 from datetime import datetime, timezone
 from typing import Optional
 
+import httpx
+
 from services.weather_service import score_weather_along_route
 from services.mappls_service import get_route
-from services.gemini_service import get_route_events
-from services.segment_service import get_cities_ahead
 
 logger = logging.getLogger(__name__)
 
@@ -112,58 +112,75 @@ async def _compute_traffic_score(current_location: dict, dest_coords: dict) -> d
         logger.error(f"Traffic scoring failed: {e}")
         return {"score": 50, "reason": "Traffic data unavailable", "weight": WEIGHTS["traffic"], "traffic_ratio": None}
 
+# At the top, replace gemini/segment imports with:
+from routers.incidents import _build_bbox, _parse_incidents, TOMTOM_KEY
 
-# ── 3. Events ──────────────────────────────────────────────────────────────────
+# Incident type → risk points
+INCIDENT_SCORE_MAP = {
+    "ROAD_CLOSED":         30,
+    "ACCIDENT":            20,
+    "FLOODING":            18,
+    "DANGEROUS_CONDITIONS":12,
+    "ROAD_WORKS":          12,
+    "HAZARD":              10,
+    "ROAD_HAZARD":         0.5,
+    "JAM":                 10,
+    "BROKEN_DOWN_VEHICLE":  8,
+    "HIGH_WINDS":           8,
+    "RAIN":                 6,
+}
 
-async def _compute_event_score(
-    origin_name: str,
-    dest_name: str,
-    named_waypoints: list[dict],
-    current_location: dict,
-    road_names: list[str],
-    eta_seconds: int,
-    skip_gemini: bool = False,        # ← add this parameter
-    cached_event_score: dict = None,  # ← and this
-) -> dict:
+# magnitude 0-3 → multiplier
+MAGNITUDE_MULT = {0: 0.5, 1: 0.6, 2: 1.0, 3: 1.5}
+
+
+async def _compute_event_score(waypoints: list[dict]) -> dict:
+    """waypoints = shipment's route_waypoints [{lat, lng}, ...]"""
     try:
-        # Skip Gemini if TTL not reached 
-        if skip_gemini and cached_event_score:
-            return {
-                **cached_event_score,
-                "reason": cached_event_score.get("reason", "") + " (cached)",
-            }
+        if not waypoints or len(waypoints) < 2:
+            return {"score": 0, "reason": "No waypoints", "weight": WEIGHTS["events"], "events_found": []}
 
-        # rest of my code 
-        ahead = get_cities_ahead(named_waypoints, current_location)
+        lng_min, lat_min, lng_max, lat_max = _build_bbox(waypoints)
+        bbox_str = f"{lng_min:.4f},{lat_min:.4f},{lng_max:.4f},{lat_max:.4f}"
 
-        # named_waypoints have "city" key from Nominatim reverse geocoding, i am dooing reserse pyschologoy hehe
-        city_names = list(dict.fromkeys([
-            wp.get("city", "")
-            for wp in ahead
-            if wp.get("city", "")
-        ]))
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            url = (
+                f"https://api.tomtom.com/traffic/services/5/incidentDetails"
+                f"?key={TOMTOM_KEY}&bbox={bbox_str}&language=en-GB&zoom=10"
+            )
+            resp = await client.get(url)
+            resp.raise_for_status()
+            data = resp.json()
 
-        eta_hours = round(eta_seconds / 3600, 1) if eta_seconds else 4.0
-
-        result = await get_route_events(
-            origin=origin_name,
-            destination=dest_name,
-            segment_cities=city_names,
-            eta_hours=eta_hours,
-            road_names=road_names,
+        raw = (
+            data.get("features")
+            or data.get("incidentFeatures")
+            or data.get("incidents")
+            or []
         )
 
+        incidents = _parse_incidents(raw, waypoints)
+
+        total = 0.0
+        for inc in incidents:
+            base = INCIDENT_SCORE_MAP.get(inc["type"], 5)
+            mult = MAGNITUDE_MULT.get(inc["severity"], 1.0)
+            total += base * mult
+
+        score = min(round(total), 100)
+        reason = incidents[0]["description"] if incidents else "No incidents on route"
+
         return {
-            "score":        result.get("severity_score", 0),
-            "reason":       result.get("primary_concern", "No disruptions found"),
+            "score":        score,
+            "reason":       reason,
             "weight":       WEIGHTS["events"],
-            "events_found": result.get("events_found", []),
-            "confidence":   result.get("confidence", "LOW"),
+            "events_found": [i["description"] for i in incidents[:5]],
+            "incident_count": len(incidents),
         }
+
     except Exception as e:
         logger.error(f"Event scoring failed: {e}")
-        return {"score": 0, "reason": "Event analysis unavailable", "weight": WEIGHTS["events"], "events_found": []}
-
+        return {"score": 0, "reason": "Incident analysis unavailable", "weight": WEIGHTS["events"], "events_found": []}
 
 # time buffer
 
@@ -206,8 +223,6 @@ async def calculate_risk(shipment: dict) -> dict:
     dest_coords      = shipment.get("destination_coords", {})
     current_location = shipment.get("current_location") or origin_coords
     waypoints        = shipment.get("route_waypoints", [])
-    named_waypoints  = shipment.get("named_waypoints", [])
-    road_names       = shipment.get("road_names", [])
     origin_name      = shipment.get("origin_name", "origin")
     dest_name        = shipment.get("destination_name", "destination")
     eta_seconds      = shipment.get("expected_travel_seconds")
@@ -222,18 +237,13 @@ async def calculate_risk(shipment: dict) -> dict:
     cached_events    = (last_assessment.get("breakdown") or {}).get("events")
     skip_gemini      = shipment.get("_skip_gemini", False)
 
-    logger.info(f"Calculating risk: {origin_name} → {dest_name} | skip_gemini={skip_gemini}")
+    logger.info(f"Calculating risk for shipment with {len(waypoints)} waypoints")
 
     import asyncio
     weather_data, traffic_data, event_data = await asyncio.gather(
         _compute_weather_score(waypoints, current_location, origin_coords, eta_seconds, distance_km),
         _compute_traffic_score(current_location, dest_coords),
-        _compute_event_score(
-            origin_name, dest_name, named_waypoints,
-            current_location, road_names, eta_seconds,
-            skip_gemini=skip_gemini,
-            cached_event_score=cached_events,
-        ),
+        _compute_event_score(waypoints),
     )
 
     time_buffer_data = _compute_time_buffer_score(created_at, eta_seconds)
