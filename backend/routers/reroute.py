@@ -17,13 +17,19 @@
 #       score                  → combined score number
 
 import logging
+from typing import Any
 
 from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from database import db
-from routers.reroute_engine import get_alternatives
+from routers.reroute_engine import get_alternatives, score_alternatives_risk
+
+
+class ScoreRequest(BaseModel):
+    alternatives: list[dict[str, Any]]
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/reroute", tags=["reroute"])
@@ -135,3 +141,25 @@ async def get_reroute(id: str):
         f"reroute_suggested={transformed['reroute_suggested']}"
     )
     return transformed
+
+
+@router.post("/{id}/score")
+async def score_reroute(id: str, body: ScoreRequest):
+    """
+    On-demand full risk scoring (weather + traffic) for the given alternatives.
+    Called when the user clicks "Assess Risk" in the frontend.
+    """
+    if not await db.shipments.find_one({"_id": _to_id(id)}):
+        raise HTTPException(status_code=404, detail="Shipment not found")
+
+    if not body.alternatives:
+        raise HTTPException(status_code=400, detail="No alternatives provided to score")
+
+    try:
+        scored = await score_alternatives_risk(body.alternatives)
+    except Exception as e:
+        logger.error(f"Risk scoring failed for {id}: {e}")
+        raise HTTPException(status_code=503, detail=f"Risk scoring failed: {str(e)}")
+
+    logger.info(f"Risk scored for {id} — {len(scored)} alternatives")
+    return {"scored_alternatives": scored}

@@ -259,7 +259,7 @@ async def get_route_incidents(id: str):
             )
 
         # Run in batches of 5 — fast enough, won't hit rate limit
-        BATCH_SIZE = 10
+        BATCH_SIZE = 24
         for i in range(0, len(bboxes), BATCH_SIZE):
             batch = bboxes[i:i+BATCH_SIZE]
             results = await asyncio.gather(*[fetch_one(client, b) for b in batch])
@@ -267,11 +267,11 @@ async def get_route_incidents(id: str):
                 all_raw_incidents.extend(r)
     # Step 3 — Parse + filter to corridor
     
-    if all_raw_incidents and "properties" in (all_raw_incidents[0] if all_raw_incidents else {}):
-        all_raw_incidents = [
-            {**item.get("properties", {}), "geometry": item.get("geometry")}
-            for item in all_raw_incidents
-        ]
+    # if all_raw_incidents and "properties" in (all_raw_incidents[0] if all_raw_incidents else {}):
+    #     all_raw_incidents = [
+    #         {**item.get("properties", {}), "geometry": item.get("geometry")}
+    #         for item in all_raw_incidents
+    #     ]
 
     filtered = _parse_incidents(all_raw_incidents, dense_points)
 

@@ -19,13 +19,13 @@ from core.websocket_manager import manager
 logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
 
-# We are calling Gemini according to the risk level I think we can call Gemini every two minutes if the risk is too high that can cause a significant amount of token costing but lock we can't do anything about it also I've already kept the token limit to 4KI mean 4000 not 4K really 4K is like 2160P which is a resolution I wish I had a laptop with 4K screen but that's not possible and this is daydreaming
+# We are calling Gemini according to the risk level I think we can call Gemini every two minutes if the risk is too high that can cause a significant amount of token costing but look we can't do anything about it also I've already kept the token limit to 4KI mean 4000 not 4K really 4K is like 2160P which is a resolution I wish I had a laptop with 4K screen but that's not possible and this is daydreaming
 GEMINI_TTL = {
     "LOW":      30 * 60,   # 30 mins
     "MEDIUM":   15 * 60,   # 15 mins
     "HIGH":      5 * 60,   #  5 mins
-    "CRITICAL":  2 * 60,   #  2 mins
-    "UNKNOWN":  15 * 60,   # default
+    "CRITICAL":  2 * 60,   # 2 mins
+    "UNKNOWN":  15 * 60,   # default 
 }
 
 

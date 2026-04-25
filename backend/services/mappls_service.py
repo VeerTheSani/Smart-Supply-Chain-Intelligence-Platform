@@ -273,6 +273,126 @@ def _decode_polyline(encoded: str) -> list:
     return coords
 
 
+# ── Alternative routes via perpendicular midpoint offsets ─────────────────────
+
+def _compute_offset_midpoints(origin: dict, dest: dict, offset_km: float = None) -> tuple:
+    """
+    Compute two midpoints shifted perpendicular to the direct route.
+    No hardcoded cities — purely geometric. Works for any origin/destination.
+
+    Example: Delhi→Mumbai direct goes SW. Left offset shifts the midpoint
+    east (~Nagpur corridor), right offset shifts it west (~Gujarat corridor).
+    """
+    mid_lat = (origin["lat"] + dest["lat"]) / 2
+    mid_lng = (origin["lng"] + dest["lng"]) / 2
+
+    dlat = dest["lat"] - origin["lat"]
+    dlng = dest["lng"] - origin["lng"]
+    length = math.sqrt(dlat ** 2 + dlng ** 2)
+
+    if offset_km is None:
+        route_dist_km = _haversine_km(origin["lat"], origin["lng"], dest["lat"], dest["lng"])
+        offset_km = max(100, min(350, route_dist_km * 0.20))
+    if length == 0:
+        return {"lat": mid_lat, "lng": mid_lng}, {"lat": mid_lat, "lng": mid_lng}
+
+    # Normalize direction, then rotate 90° to get perpendicular
+    dlat_n = dlat / length
+    dlng_n = dlng / length
+    perp_lat = -dlng_n
+    perp_lng =  dlat_n
+
+    deg = offset_km / 111.0  # ~111 km per degree latitude
+    left  = {"lat": round(mid_lat + perp_lat * deg, 6), "lng": round(mid_lng + perp_lng * deg, 6)}
+    right = {"lat": round(mid_lat - perp_lat * deg, 6), "lng": round(mid_lng - perp_lng * deg, 6)}
+    return left, right
+
+
+async def get_route_alternatives(
+    origin_coords: dict,
+    dest_coords: dict,
+    offset_km: float = None,
+) -> list[dict]:
+    """
+    Returns 3 route variants using route_adv (traffic-accurate):
+      1. Direct origin → destination
+      2. Via left-offset midpoint  (forces a different road corridor)
+      3. Via right-offset midpoint (forces a different road corridor)
+
+    No hardcoded city names. Midpoints are computed geometrically.
+    """
+    import asyncio
+
+    left_mid, right_mid = _compute_offset_midpoints(origin_coords, dest_coords, offset_km)
+    token = await get_token()
+
+    async def _fetch_via(via: dict | None) -> dict | Exception:
+        if via:
+            coords_str = (
+                f"{origin_coords['lng']},{origin_coords['lat']};"
+                f"{via['lng']},{via['lat']};"
+                f"{dest_coords['lng']},{dest_coords['lat']}"
+            )
+        else:
+            coords_str = (
+                f"{origin_coords['lng']},{origin_coords['lat']};"
+                f"{dest_coords['lng']},{dest_coords['lat']}"
+            )
+
+        params = {"traffic": "true", "geometries": "polyline", "overview": "full", "steps": "false"}
+
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.get(
+                    f"https://apis.mappls.com/advancedmaps/v1/{token}/route_adv/driving/{coords_str}",
+                    params=params,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception as e:
+            logger.warning(f"Mappls alternative fetch failed (via={via}): {e}")
+            return e
+
+        routes = data.get("routes", [])
+        if not routes:
+            return RuntimeError("Mappls returned no routes for this via point")
+
+        r        = routes[0]
+        dur_with = int(r.get("duration", 0))
+        distance = r.get("distance", 0)
+
+        if dur_with == 0 or distance == 0:
+            return RuntimeError(f"Mappls returned zero-data route for via={via} — skipping")
+
+        dur_no_tr = int(r.get("duration_without_traffic", dur_with))
+        coords    = _decode_polyline(r.get("geometry", ""))
+        return {
+            "waypoints":                   _extract_waypoints_every_50km(coords),
+            "distance_km":                 round(distance / 1000, 2),
+            "duration_seconds":            dur_with,
+            "duration_no_traffic_seconds": dur_no_tr,
+            "traffic_ratio":               round(dur_with / dur_no_tr, 3) if dur_no_tr > 0 else 1.0,
+            "eta_hours":                   round(dur_with / 3600, 2),
+        }
+
+    results = await asyncio.gather(
+        _fetch_via(None),       # direct
+        _fetch_via(left_mid),   # via left offset
+        _fetch_via(right_mid),  # via right offset
+    )
+
+    valid = [r for r in results if isinstance(r, dict)]
+    failed = len(results) - len(valid)
+    if failed:
+        logger.warning(f"{failed} alternative route(s) failed, got {len(valid)} valid")
+
+    if len(valid) < 2:
+        raise RuntimeError(f"Only {len(valid)} route(s) computed — need at least 2 for alternatives")
+
+    logger.info(f"Alternatives: {len(valid)}/3 routes computed for {origin_coords} → {dest_coords}")
+    return valid
+
+
 ## testing this garbage if its any good or another loose
 
 if __name__ == "__main__":
