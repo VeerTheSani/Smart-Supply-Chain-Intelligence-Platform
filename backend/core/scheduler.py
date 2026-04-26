@@ -6,6 +6,7 @@
 #   3. Broadcasts alerts via WebSocket if risk changed
 #   4. Auto-reroutes if HIGH/CRITICAL and auto_reroute_enabled=True
 
+import asyncio
 import logging
 import math
 from datetime import datetime, timezone, timedelta
@@ -234,6 +235,13 @@ async def _process_shipment(shipment: dict):
     except Exception as e:
         logger.error(f"MongoDB update failed for {shipment_id}: {e}")
         return
+
+    # STEP 9 — Refresh incidents in background (non-blocking)
+    try:
+        from routers.incidents import fetch_and_store_incidents
+        asyncio.create_task(fetch_and_store_incidents(shipment["_id"]))
+    except Exception as e:
+        logger.warning(f"Incident refresh task failed to start for {shipment_id}: {e}")
 
     # STEP 9 — Broadcast alert if risk changed OR auto rerouted
     if risk_changed or auto_rerouted:

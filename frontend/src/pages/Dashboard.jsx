@@ -85,6 +85,8 @@ const getIncidentIcon = (type) => {
     ["JAM", "ROAD_WORKS"].includes(type) ? "#f97316" : "#facc15";
   return new L.DivIcon({
     className: "",
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
     html: `<div style="
       background:${color};width:22px;height:22px;border-radius:50%;
       border:2px solid white;display:flex;align-items:center;
@@ -98,7 +100,7 @@ const SEVERITY_LABELS = ["Unknown", "Minor", "Moderate", "Major", "Critical"];
 const Dashboard = memo(function Dashboard() {
   const { theme } = useTheme();
   const [selectedId, setSelectedId] = useState(null);
-  const [incidentData, setIncidentData] = useState({});
+  const [incidentOverride, setIncidentOverride] = useState({});
 
   const { data, isLoading, error } = useDashboard();
   const { isLoading: shipmentsLoading } = useShipments();
@@ -108,26 +110,29 @@ const Dashboard = memo(function Dashboard() {
     s => s.risk?.current?.risk_level === 'high'
   ).length;
 
-  // Auto-refresh incidents every 2 mins when a shipment is selected
+  // For every shipment with no stored incidents, fire a background fetch once.
+  // This covers: newly created shipments where TomTom hasn't returned yet,
+  // and old shipments that predate the incident storage feature.
   useEffect(() => {
-    if (!selectedId) return;
+    shipments.forEach(s => {
+      if ((s.route_incidents?.length ?? 0) > 0) return;  // already have data
+      if (incidentOverride[s.id] !== undefined) return;   // already fetched this session
 
-    const fetchIncidents = async () => {
-      try {
-        const res = await fetch(`http://localhost:8000/api/shipments/${selectedId}/incidents`);
-        const json = await res.json();
-        setIncidentData(prev => ({ ...prev, [selectedId]: json.incidents || [] }));
-      } catch (e) {
-        console.error("Incidents fetch error", e);
-      }
-    };
+      // Mark as attempted immediately so concurrent renders don't double-fire
+      setIncidentOverride(prev => ({ ...prev, [s.id]: prev[s.id] ?? null }));
 
-    fetchIncidents(); // fetch immediately on select
-    const interval = setInterval(fetchIncidents, 30 * 60 * 1000); 
-    return () => clearInterval(interval);
-  }, [selectedId]);
+      fetch(`/api/shipments/${s.id}/incidents`)
+        .then(r => r.json())
+        .then(json => {
+          if (json.incidents?.length > 0) {
+            setIncidentOverride(prev => ({ ...prev, [s.id]: json.incidents }));
+          }
+        })
+        .catch(() => {});
+    });
+  }, [shipments]);
 
-  const handleMarkerClick = async (shipmentId) => {
+  const handleMarkerClick = (shipmentId) => {
     setSelectedId(prev => prev === shipmentId ? null : shipmentId);
   };
 
@@ -189,7 +194,7 @@ const Dashboard = memo(function Dashboard() {
           <MapContainer
             center={window.innerWidth < 768 ? [20, 0] : [23, 72]}
             zoom={window.innerWidth < 768 ? 2 : 5}
-            scrollWheelZoom={false}
+            scrollWheelZoom={true}
             style={{ height: "100%", width: "100%", zIndex: 0 }}
           >
             <TileLayer
@@ -217,9 +222,10 @@ const Dashboard = memo(function Dashboard() {
               return (
                 <div key={shipment.id}>
                   {/* Road route line */}
-                  {shipment.route_waypoints?.length > 1 && (
+                  {(shipment.route_waypoints?.length > 1 || shipment.route_geometry_encoded) && (
                     <RoadRoute
                       waypoints={shipment.route_waypoints}
+                      geometryEncoded={shipment.route_geometry_encoded}
                       color={isSelected ? "#3b82f6" : isHigh ? "#ef4444" : isMed ? "#f97316" : "#22c55e"}
                     />
                   )}
@@ -257,7 +263,8 @@ const Dashboard = memo(function Dashboard() {
                             ETA: {etaDelay}
                           </span>
                         </div>
-                        {shipment.risk?.current?.reason && (
+                        {shipment.risk?.current?.reason &&
+                          !shipment.risk.current.reason.toLowerCase().includes('unavailable') && (
                           <div className="bg-danger/10 mt-1 p-1 rounded border border-danger/20 text-danger text-[9px]">
                             ⚠️ {shipment.risk.current.reason}
                           </div>
@@ -266,8 +273,9 @@ const Dashboard = memo(function Dashboard() {
                     </Popup>
                   </Marker>
 
-                  {/* Incident markers — only show when this shipment is selected */}
-                  {isSelected && incidentData[shipment.id]?.map((incident, idx) => (
+                  {/* Incident markers — only for selected shipment */}
+                  {isSelected && (shipment.route_incidents?.length > 0 ? shipment.route_incidents : (incidentOverride[shipment.id] || []))
+                    .map((incident, idx) => (
                     <Marker
                       key={`incident-${shipment.id}-${idx}`}
                       position={[incident.lat, incident.lng]}
@@ -301,11 +309,17 @@ const Dashboard = memo(function Dashboard() {
               <p className="text-success">✔ All shipments running smoothly</p>
             )}
             <p className="mt-2 text-theme-secondary text-[11px]">Total Active: {shipments.length}</p>
-            {selectedId && incidentData[selectedId] && (
-              <p className="mt-1 text-warning text-[11px]">
-                ⚠️ {incidentData[selectedId].length} incidents on route
-              </p>
-            )}
+            {(() => {
+              const total = shipments.reduce((sum, s) => {
+                const count = s.route_incidents?.length > 0
+                  ? s.route_incidents.length
+                  : (incidentOverride[s.id]?.length ?? 0);
+                return sum + count;
+              }, 0);
+              return total > 0 ? (
+                <p className="mt-1 text-warning text-[11px]">⚠️ {total} active incidents on network</p>
+              ) : null;
+            })()}
           </div>
         </div>
       </motion.div>

@@ -4,8 +4,6 @@ import math
 from datetime import datetime, timezone
 from typing import Optional
 
-import httpx
-
 from services.weather_service import score_weather_along_route
 from services.mappls_service import get_route
 
@@ -112,75 +110,53 @@ async def _compute_traffic_score(current_location: dict, dest_coords: dict) -> d
         logger.error(f"Traffic scoring failed: {e}")
         return {"score": 50, "reason": "Traffic data unavailable", "weight": WEIGHTS["traffic"], "traffic_ratio": None}
 
-# At the top, replace gemini/segment imports with:
-from routers.incidents import _build_bbox, _parse_incidents, TOMTOM_KEY
-
-# Incident type → risk points
+# Incident type → risk contribution points
 INCIDENT_SCORE_MAP = {
-    "ROAD_CLOSED":         30,
-    "ACCIDENT":            20,
-    "FLOODING":            18,
-    "DANGEROUS_CONDITIONS":12,
-    "ROAD_WORKS":          12,
-    "HAZARD":              10,
-    "ROAD_HAZARD":         0.5,
-    "JAM":                 10,
-    "BROKEN_DOWN_VEHICLE":  8,
-    "HIGH_WINDS":           8,
-    "RAIN":                 6,
+    "ROAD_CLOSED":          30,
+    "ACCIDENT":             20,
+    "FLOODING":             18,
+    "DANGEROUS_CONDITIONS": 12,
+    "ROAD_WORKS":           12,
+    "HAZARD":               10,
+    "JAM":                  10,
+    "BROKEN_DOWN_VEHICLE":   8,
+    "HIGH_WINDS":            8,
+    "RAIN":                  6,
+    "ROAD_HAZARD":           5,
 }
 
 # magnitude 0-3 → multiplier
 MAGNITUDE_MULT = {0: 0.5, 1: 0.6, 2: 1.0, 3: 1.5}
 
 
-async def _compute_event_score(waypoints: list[dict]) -> dict:
-    """waypoints = shipment's route_waypoints [{lat, lng}, ...]"""
-    try:
-        if not waypoints or len(waypoints) < 2:
-            return {"score": 0, "reason": "No waypoints", "weight": WEIGHTS["events"], "events_found": []}
-
-        lng_min, lat_min, lng_max, lat_max = _build_bbox(waypoints)
-        bbox_str = f"{lng_min:.4f},{lat_min:.4f},{lng_max:.4f},{lat_max:.4f}"
-
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            url = (
-                f"https://api.tomtom.com/traffic/services/5/incidentDetails"
-                f"?key={TOMTOM_KEY}&bbox={bbox_str}&language=en-GB&zoom=10"
-            )
-            resp = await client.get(url)
-            resp.raise_for_status()
-            data = resp.json()
-
-        raw = (
-            data.get("features")
-            or data.get("incidentFeatures")
-            or data.get("incidents")
-            or []
-        )
-
-        incidents = _parse_incidents(raw, waypoints)
-
-        total = 0.0
-        for inc in incidents:
-            base = INCIDENT_SCORE_MAP.get(inc["type"], 5)
-            mult = MAGNITUDE_MULT.get(inc["severity"], 1.0)
-            total += base * mult
-
-        score = min(round(total), 100)
-        reason = incidents[0]["description"] if incidents else "No incidents on route"
-
+def _compute_event_score(stored_incidents: list[dict]) -> dict:
+    """
+    Score road incidents using the list already stored in MongoDB
+    (route_incidents field, refreshed by the scheduler every 5 min).
+    No TomTom API call — reads from what the incident service cached.
+    """
+    if not stored_incidents:
         return {
-            "score":        score,
-            "reason":       reason,
-            "weight":       WEIGHTS["events"],
-            "events_found": [i["description"] for i in incidents[:5]],
-            "incident_count": len(incidents),
+            "score": 0, "reason": "No incidents on route",
+            "weight": WEIGHTS["events"], "events_found": [], "incident_count": 0,
         }
 
-    except Exception as e:
-        logger.error(f"Event scoring failed: {e}")
-        return {"score": 0, "reason": "Incident analysis unavailable", "weight": WEIGHTS["events"], "events_found": []}
+    total = 0.0
+    for inc in stored_incidents:
+        base = INCIDENT_SCORE_MAP.get(inc.get("type", ""), 5)
+        mult = MAGNITUDE_MULT.get(inc.get("severity", 0), 1.0)
+        total += base * mult
+
+    score  = min(round(total), 100)
+    reason = stored_incidents[0]["description"] if stored_incidents else "No incidents on route"
+
+    return {
+        "score":          score,
+        "reason":         reason,
+        "weight":         WEIGHTS["events"],
+        "events_found":   [i["description"] for i in stored_incidents[:5]],
+        "incident_count": len(stored_incidents),
+    }
 
 # time buffer
 
@@ -223,8 +199,6 @@ async def calculate_risk(shipment: dict) -> dict:
     dest_coords      = shipment.get("destination_coords", {})
     current_location = shipment.get("current_location") or origin_coords
     waypoints        = shipment.get("route_waypoints", [])
-    origin_name      = shipment.get("origin_name", "origin")
-    dest_name        = shipment.get("destination_name", "destination")
     eta_seconds      = shipment.get("expected_travel_seconds")
     distance_km      = shipment.get("distance_km", 0)
     created_at       = shipment.get("created_at", datetime.now(timezone.utc))
@@ -232,19 +206,16 @@ async def calculate_risk(shipment: dict) -> dict:
     if isinstance(created_at, str):
         created_at = datetime.fromisoformat(created_at)
 
-    # gemini cache checking
-    last_assessment  = shipment.get("last_risk_assessment") or {}
-    cached_events    = (last_assessment.get("breakdown") or {}).get("events")
-    skip_gemini      = shipment.get("_skip_gemini", False)
+    stored_incidents = shipment.get("route_incidents", [])
 
-    logger.info(f"Calculating risk for shipment with {len(waypoints)} waypoints")
+    logger.info(f"Calculating risk for shipment with {len(waypoints)} waypoints, {len(stored_incidents)} stored incidents")
 
     import asyncio
-    weather_data, traffic_data, event_data = await asyncio.gather(
+    weather_data, traffic_data = await asyncio.gather(
         _compute_weather_score(waypoints, current_location, origin_coords, eta_seconds, distance_km),
         _compute_traffic_score(current_location, dest_coords),
-        _compute_event_score(waypoints),
     )
+    event_data = _compute_event_score(stored_incidents)
 
     time_buffer_data = _compute_time_buffer_score(created_at, eta_seconds)
     historical_data  = _compute_historical_score()

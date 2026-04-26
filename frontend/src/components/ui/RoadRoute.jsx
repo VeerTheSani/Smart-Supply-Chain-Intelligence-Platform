@@ -1,30 +1,34 @@
-import { useEffect } from 'react'
-import { useMap } from 'react-leaflet'
-import L from 'leaflet'
-import 'leaflet-routing-machine'
+import { Polyline } from 'react-leaflet'
+import polyline from '@mapbox/polyline'
 
-export default function RoadRoute({ waypoints, color = '#22c55e' }) {
-  const map = useMap()
+export default function RoadRoute({ waypoints, geometryEncoded, color = '#22c55e', opacity = 0.8 }) {
+  let positions
 
-  useEffect(() => {
-    if (!waypoints?.length || waypoints.length < 2) return
+  if (geometryEncoded) {
+    try {
+      positions = polyline.decode(geometryEncoded) // [[lat, lng], ...]
+    } catch {
+      positions = null
+    }
+  }
 
-    const control = L.Routing.control({
-      waypoints: waypoints.map(wp => L.latLng(wp.lat, wp.lng)),
-      routeWhileDragging: false,
-      show: false,
-      addWaypoints: false,
-      fitSelectedRoutes: false,
-      lineOptions: {
-        styles: [{ color, weight: 3, opacity: 0.7, dashArray: '6, 10' }]
-      },
-      createMarker: () => null,  // no extra markers at each waypoint
-      containerClassName: 'hidden-routing-panel'
-    }).addTo(map)
+  if (!positions?.length) {
+    if (!waypoints?.length || waypoints.length < 2) return null
+    positions = waypoints.map(wp => [wp.lat, wp.lng])
+  }
 
-    return () => map.removeControl(control)
-  }, [map, waypoints, color])
-
-  return null
+  return (
+    <>
+      {/* Glow layer */}
+      <Polyline
+        positions={positions}
+        pathOptions={{ color, weight: 6, opacity: 0.2 }}
+      />
+      {/* Main line */}
+      <Polyline
+        positions={positions}
+        pathOptions={{ color, weight: 2.5, opacity, dashArray: '8, 6' }}
+      />
+    </>
+  )
 }
-

@@ -45,6 +45,32 @@ async def geocode(place_name: str) -> dict:
         raise RuntimeError(f"Geocoding failed for '{place_name}'")
 
 
+async def reverse_geocode(lat: float, lng: float) -> str:
+    """Return a short place name for coordinates (city or district level)."""
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as client:
+            resp = await client.get(
+                "https://nominatim.openstreetmap.org/reverse",
+                params={"lat": lat, "lon": lng, "format": "json", "zoom": 10},
+                headers=HEADERS,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        addr = data.get("address", {})
+        name = (
+            addr.get("city")
+            or addr.get("town")
+            or addr.get("village")
+            or addr.get("county")
+            or addr.get("state_district")
+            or addr.get("state")
+            or f"{lat:.2f},{lng:.2f}"
+        )
+        return name
+    except Exception:
+        return f"{lat:.2f},{lng:.2f}"
+
+
 if __name__ == "__main__":
     import asyncio
 
