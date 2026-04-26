@@ -101,6 +101,7 @@ const Dashboard = memo(function Dashboard() {
   const { theme } = useTheme();
   const [selectedId, setSelectedId] = useState(null);
   const [incidentOverride, setIncidentOverride] = useState({});
+  const [fetchingIncidents, setFetchingIncidents] = useState(0);
 
   const { data, isLoading, error } = useDashboard();
   const { isLoading: shipmentsLoading } = useShipments();
@@ -120,6 +121,7 @@ const Dashboard = memo(function Dashboard() {
 
       // Mark as attempted immediately so concurrent renders don't double-fire
       setIncidentOverride(prev => ({ ...prev, [s.id]: prev[s.id] ?? null }));
+      setFetchingIncidents(n => n + 1);
 
       fetch(`/api/shipments/${s.id}/incidents`)
         .then(r => r.json())
@@ -128,7 +130,8 @@ const Dashboard = memo(function Dashboard() {
             setIncidentOverride(prev => ({ ...prev, [s.id]: json.incidents }));
           }
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => setFetchingIncidents(n => Math.max(0, n - 1)));
     });
   }, [shipments]);
 
@@ -303,6 +306,21 @@ const Dashboard = memo(function Dashboard() {
           {/* Live summary overlay */}
           <div className="absolute top-4 right-4 bg-theme-secondary/90 p-4 rounded-xl w-52 z-[1000] border border-theme text-xs shadow-lg">
             <h3 className="font-bold mb-2 text-theme-primary">Live Status</h3>
+            {fetchingIncidents > 0 && (
+              <div className="mb-2">
+                <div className="flex justify-between text-[10px] text-theme-secondary mb-1">
+                  <span>Scanning incidents…</span>
+                  <span>{fetchingIncidents} route{fetchingIncidents > 1 ? 's' : ''}</span>
+                </div>
+                <div className="w-full h-1 bg-theme-tertiary rounded-full overflow-hidden">
+                  <motion.div
+                    className="h-full bg-warning rounded-full"
+                    animate={{ x: ['-100%', '100%'] }}
+                    transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
+                  />
+                </div>
+              </div>
+            )}
             {highRiskCount > 0 ? (
               <p className="text-danger font-bold">⚠ {highRiskCount} shipment needs attention</p>
             ) : (
