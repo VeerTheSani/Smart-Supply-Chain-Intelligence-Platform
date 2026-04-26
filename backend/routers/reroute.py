@@ -74,17 +74,24 @@ def _transform_for_frontend(result: dict, shipment: dict) -> dict:
         if label == "Recommended":
             recommended_route = route_id
 
+        dur = alt.get("duration_seconds", 0)
+        dist = alt.get("distance_km", 0)
         transformed_alts.append({
-            "route_id":   route_id,
-            "type":       _label_to_type(label),
-            "risk_level": alt.get("risk_level", "low").lower(),
-            "risk_score": round(alt.get("risk_score", 0), 1),
-            "eta":        alt.get("duration_seconds", 0),
-            "distance":   alt.get("distance_km", 0),
-            "score":      round(alt.get("risk_score", 0), 2),
-            # keep extra fields for our own use
-            "label":      label,
-            "waypoints":  alt.get("waypoints", []),
+            "route_id":          route_id,
+            "type":              _label_to_type(label),
+            "risk_level":        alt.get("risk_level", "low").lower(),
+            "risk_score":        round(alt.get("risk_score", 0), 1),
+            # UI-friendly aliases
+            "eta":               dur,
+            "distance":          dist,
+            "score":             round(alt.get("risk_score", 0), 2),
+            # canonical names preserved so score endpoint can use them
+            "duration_seconds":  dur,
+            "distance_km":       dist,
+            "traffic_ratio":     alt.get("traffic_ratio", 1.0),
+            # extra fields
+            "label":             label,
+            "waypoints":         alt.get("waypoints", []),
             "extra_time_minutes": alt.get("extra_time_minutes", 0),
         })
 

@@ -275,70 +275,73 @@ def _decode_polyline(encoded: str) -> list:
 
 # ── Alternative routes via perpendicular midpoint offsets ─────────────────────
 
-def _compute_offset_midpoints(origin: dict, dest: dict, offset_km: float = None) -> tuple:
+def _compute_via_point(origin: dict, dest: dict, position: float, offset_km: float) -> dict:
     """
-    Compute two midpoints shifted perpendicular to the direct route.
-    No hardcoded cities — purely geometric. Works for any origin/destination.
-
-    Example: Delhi→Mumbai direct goes SW. Left offset shifts the midpoint
-    east (~Nagpur corridor), right offset shifts it west (~Gujarat corridor).
+    Compute a single via-point at `position` (0–1) along the O→D line,
+    shifted perpendicular by `offset_km` (positive = right, negative = left).
     """
-    mid_lat = (origin["lat"] + dest["lat"]) / 2
-    mid_lng = (origin["lng"] + dest["lng"]) / 2
+    pt_lat = origin["lat"] + (dest["lat"] - origin["lat"]) * position
+    pt_lng = origin["lng"] + (dest["lng"] - origin["lng"]) * position
 
     dlat = dest["lat"] - origin["lat"]
     dlng = dest["lng"] - origin["lng"]
     length = math.sqrt(dlat ** 2 + dlng ** 2)
-
-    if offset_km is None:
-        route_dist_km = _haversine_km(origin["lat"], origin["lng"], dest["lat"], dest["lng"])
-        offset_km = max(100, min(350, route_dist_km * 0.20))
     if length == 0:
-        return {"lat": mid_lat, "lng": mid_lng}, {"lat": mid_lat, "lng": mid_lng}
+        return {"lat": round(pt_lat, 6), "lng": round(pt_lng, 6)}
 
-    # Normalize direction, then rotate 90° to get perpendicular
     dlat_n = dlat / length
     dlng_n = dlng / length
-    perp_lat = -dlng_n
-    perp_lng =  dlat_n
+    # Right-perpendicular unit vector: rotate direction 90° clockwise
+    perp_lat =  dlng_n
+    perp_lng = -dlat_n
 
-    deg = offset_km / 111.0  # ~111 km per degree latitude
-    left  = {"lat": round(mid_lat + perp_lat * deg, 6), "lng": round(mid_lng + perp_lng * deg, 6)}
-    right = {"lat": round(mid_lat - perp_lat * deg, 6), "lng": round(mid_lng - perp_lng * deg, 6)}
-    return left, right
+    deg  = abs(offset_km) / 111.0
+    sign = 1 if offset_km >= 0 else -1
+    return {
+        "lat": round(pt_lat + perp_lat * deg * sign, 6),
+        "lng": round(pt_lng + perp_lng * deg * sign, 6),
+    }
+
+
+def _compute_three_via_points(origin: dict, dest: dict) -> tuple:
+    """
+    Return three via-points that force genuinely different road corridors.
+
+    For a Delhi→Mumbai-style SW route:
+      via_a — midpoint, pushed LEFT  (west corridor, e.g. Gujarat coast)
+      via_b — midpoint, pushed RIGHT (east corridor, e.g. Nagpur/Deccan)
+      via_c — 35% along route, pushed RIGHT further (forces divergence early)
+    All offsets are capped so the via-point stays inside India / reachable road network.
+    """
+    route_dist_km = _haversine_km(origin["lat"], origin["lng"], dest["lat"], dest["lng"])
+    base_offset   = max(100, min(250, route_dist_km * 0.18))
+
+    via_a = _compute_via_point(origin, dest, 0.50, -base_offset)           # left mid
+    via_b = _compute_via_point(origin, dest, 0.50,  base_offset * 1.10)    # right mid
+    via_c = _compute_via_point(origin, dest, 0.35,  base_offset * 1.40)    # right, earlier
+    return via_a, via_b, via_c
 
 
 async def get_route_alternatives(
     origin_coords: dict,
     dest_coords: dict,
-    offset_km: float = None,
 ) -> list[dict]:
     """
-    Returns 3 route variants using route_adv (traffic-accurate):
-      1. Direct origin → destination
-      2. Via left-offset midpoint  (forces a different road corridor)
-      3. Via right-offset midpoint (forces a different road corridor)
-
-    No hardcoded city names. Midpoints are computed geometrically.
+    Returns up to 3 alternative route corridors using route_adv (traffic-accurate).
+    Via-points are computed geometrically — no hardcoded city names.
+    The direct O→D route is intentionally excluded (it equals the current route).
     """
     import asyncio
 
-    left_mid, right_mid = _compute_offset_midpoints(origin_coords, dest_coords, offset_km)
+    via_a, via_b, via_c = _compute_three_via_points(origin_coords, dest_coords)
     token = await get_token()
 
-    async def _fetch_via(via: dict | None) -> dict | Exception:
-        if via:
-            coords_str = (
-                f"{origin_coords['lng']},{origin_coords['lat']};"
-                f"{via['lng']},{via['lat']};"
-                f"{dest_coords['lng']},{dest_coords['lat']}"
-            )
-        else:
-            coords_str = (
-                f"{origin_coords['lng']},{origin_coords['lat']};"
-                f"{dest_coords['lng']},{dest_coords['lat']}"
-            )
-
+    async def _fetch_via(via: dict) -> dict | Exception:
+        coords_str = (
+            f"{origin_coords['lng']},{origin_coords['lat']};"
+            f"{via['lng']},{via['lat']};"
+            f"{dest_coords['lng']},{dest_coords['lat']}"
+        )
         params = {"traffic": "true", "geometries": "polyline", "overview": "full", "steps": "false"}
 
         try:
@@ -376,20 +379,20 @@ async def get_route_alternatives(
         }
 
     results = await asyncio.gather(
-        _fetch_via(None),       # direct
-        _fetch_via(left_mid),   # via left offset
-        _fetch_via(right_mid),  # via right offset
+        _fetch_via(via_a),
+        _fetch_via(via_b),
+        _fetch_via(via_c),
     )
 
     valid = [r for r in results if isinstance(r, dict)]
     failed = len(results) - len(valid)
     if failed:
-        logger.warning(f"{failed} alternative route(s) failed, got {len(valid)} valid")
+        logger.warning(f"{failed}/3 corridor route(s) failed, got {len(valid)} valid")
 
-    if len(valid) < 2:
-        raise RuntimeError(f"Only {len(valid)} route(s) computed — need at least 2 for alternatives")
+    if len(valid) < 1:
+        raise RuntimeError("All three corridor routes failed — cannot compute alternatives")
 
-    logger.info(f"Alternatives: {len(valid)}/3 routes computed for {origin_coords} → {dest_coords}")
+    logger.info(f"Alternatives: {len(valid)}/3 corridors computed for {origin_coords} → {dest_coords}")
     return valid
 
 

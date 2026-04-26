@@ -67,26 +67,25 @@ def _label_routes(routes: list) -> list:
     for r in routes:
         r["extra_time_minutes"] = round(max((r["duration_seconds"] - base_duration) / 60, 0), 1)
 
-    fastest = min(routes, key=lambda x: x["duration_seconds"])
-    fastest["label"] = "Fastest"
-    fastest["label_reason"] = f"Shortest travel time"
+    fastest_r = min(routes, key=lambda x: x["duration_seconds"])
+    safest_r  = min(routes, key=lambda x: x["risk_score"])
+    rec_r     = min(routes, key=lambda x: _recommended_score(x["risk_score"], x["extra_time_minutes"]))
 
-    safest = min(routes, key=lambda x: x["risk_score"])
-    safest["label"] = "Safest"
-    safest["label_reason"] = f"Lowest risk — {safest['risk_level']} ({safest['risk_score']:.0f}/100)"
-
-    recommended = min(routes, key=lambda x: _recommended_score(x["risk_score"], x["extra_time_minutes"]))
-    recommended["label"] = "Recommended"
-    recommended["label_reason"] = (
-        f"Best balance — {recommended['risk_level']} risk, "
-        f"+{recommended['extra_time_minutes']:.0f} min"
-    )
+    # Copy each so overlapping winners don't overwrite each other's label
+    fastest = {**fastest_r, "label": "Fastest",     "label_reason": "Shortest travel time"}
+    safest  = {**safest_r,  "label": "Safest",      "label_reason": f"Lowest risk — {safest_r['risk_level']} ({safest_r['risk_score']:.0f}/100)"}
+    recommended = {
+        **rec_r,
+        "label": "Recommended",
+        "label_reason": f"Best balance — {rec_r['risk_level']} risk, +{rec_r['extra_time_minutes']:.0f} min",
+    }
 
     result = []
     seen = set()
     for alt in [recommended, fastest, safest]:
-        # Deduplicate by rounding distance to 10km and duration to 5min buckets
-        key = (round(alt["distance_km"] / 10) * 10, round(alt["duration_seconds"] / 300) * 300)
+        # Deduplicate by rounding distance to 30km and duration to 15min buckets
+        # Intentionally loose — only collapse truly identical routes, not similar corridors
+        key = (round(alt["distance_km"] / 30) * 30, round(alt["duration_seconds"] / 900) * 900)
         if key not in seen:
             seen.add(key)
             result.append(alt)
@@ -110,8 +109,8 @@ async def get_alternatives(shipment: dict) -> dict:
     logger.info("Fetching alternative routes (fast path, traffic only)...")
     all_routes = await get_route_alternatives(current_location, dest_coords)
 
-    if len(all_routes) < 2:
-        raise ValueError("Could not compute enough alternative routes for this path")
+    if len(all_routes) < 1:
+        raise ValueError("Could not compute any alternative routes for this path")
 
     # Quick risk estimate from traffic ratio only — no weather API
     routes_scored = []
@@ -157,8 +156,9 @@ async def score_alternatives_risk(alternatives: list) -> list:
     """
     async def _score_one(alt: dict) -> dict:
         waypoints     = alt.get("waypoints", [])
-        eta_seconds   = alt.get("duration_seconds", 0) or alt.get("eta", 0)
-        distance_km   = alt.get("distance_km", 0)
+        # Accept both canonical names and the UI aliases set by _transform_for_frontend
+        eta_seconds   = alt.get("duration_seconds") or alt.get("eta") or 0
+        distance_km   = alt.get("distance_km") or alt.get("distance") or 0
         traffic_ratio = alt.get("traffic_ratio", 1.0)
 
         timed          = _build_timed_waypoints(waypoints, eta_seconds, distance_km)
@@ -180,12 +180,15 @@ async def score_alternatives_risk(alternatives: list) -> list:
 
         return {
             **alt,
-            "risk_score":    combined,
-            "risk_level":    _risk_level(combined).lower(),
-            "weather_score": weather_score,
-            "traffic_score": float(traffic_score),
-            "reason":        reason,
-            "risk_assessed": True,
+            # Guarantee canonical names exist regardless of what came in
+            "duration_seconds": eta_seconds,
+            "distance_km":      distance_km,
+            "risk_score":       combined,
+            "risk_level":       _risk_level(combined).lower(),
+            "weather_score":    weather_score,
+            "traffic_score":    float(traffic_score),
+            "reason":           reason,
+            "risk_assessed":    True,
         }
 
     scored = await asyncio.gather(*[_score_one(a) for a in alternatives])
