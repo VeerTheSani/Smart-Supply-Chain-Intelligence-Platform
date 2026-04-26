@@ -245,15 +245,21 @@ async def fetch_and_store_incidents(shipment_id: str | ObjectId) -> list[dict]:
 
         incidents = await _fetch_tomtom_incidents(waypoints, corridor_points=dense_points)
 
-        await db.shipments.update_one(
-            {"_id": oid},
-            {"$set": {
-                "route_incidents":            incidents,
-                "route_incidents_updated_at": datetime.now(timezone.utc),
-            }}
-        )
+        # Only overwrite stored incidents if TomTom returned data.
+        # An empty result likely means API failure (403/rate-limit), not a clear route —
+        # preserves previously fetched incidents instead of wiping them.
+        if incidents:
+            await db.shipments.update_one(
+                {"_id": oid},
+                {"$set": {
+                    "route_incidents":            incidents,
+                    "route_incidents_updated_at": datetime.now(timezone.utc),
+                }}
+            )
+            logger.info(f"Incidents stored for {shipment_id}: {len(incidents)} on-route")
+        else:
+            logger.info(f"TomTom returned no incidents for {shipment_id} — keeping existing stored data")
 
-        logger.info(f"Incidents stored for {shipment_id}: {len(incidents)} on-route")
         return incidents
 
     except Exception as e:
