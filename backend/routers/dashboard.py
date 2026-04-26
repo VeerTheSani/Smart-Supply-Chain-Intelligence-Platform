@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 
-@router.get("/")
+@router.get("")
 async def get_dashboard():
     """
     Returns everything the frontend needs on page load.

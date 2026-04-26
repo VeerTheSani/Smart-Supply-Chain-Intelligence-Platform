@@ -274,7 +274,7 @@ def _decode_polyline(encoded: str) -> list:
     return coords
 
 
-## testing this garbage if its any good or another loose
+# ── Self test ──────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import asyncio

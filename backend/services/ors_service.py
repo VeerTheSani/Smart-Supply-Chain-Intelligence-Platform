@@ -17,7 +17,7 @@ ORS_URL = "https://api.openrouteservice.org/v2/directions/driving-car/geojson"
 WAYPOINT_INTERVAL_KM = 50
 
 
-## idk what is this, ask chatgpt
+# Haversine distance formula
 def _haversine_km(lat1, lng1, lat2, lng2) -> float:
     """Straight-line distance in km between two coordinates."""
     R = 6371
@@ -29,7 +29,7 @@ def _haversine_km(lat1, lng1, lat2, lng2) -> float:
          * math.sin(d_lng / 2) ** 2)
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
-## this shit wwill calcu coord every 50 km using waypoint interval, 
+# Extract one waypoint coordinate every 50km along the route
 def _extract_waypoints_every_50km(coordinates: list) -> list[dict]:
 
     if not coordinates:
@@ -48,11 +48,11 @@ def _extract_waypoints_every_50km(coordinates: list) -> list[dict]:
 
         if accumulated_km >= WAYPOINT_INTERVAL_KM:
             waypoints.append({"lat": coord[1], "lng": coord[0]})
-            accumulated_km = 0.0#this reset the counter after placing a waypoint eveery 50 kilogram
+            accumulated_km = 0.0
 
         prev = coord
 
-    ### always include destination /(0{[if not already added]}0)\
+    # Always include destination if not already added
     last = coordinates[-1]
     last_dict = {"lat": last[1], "lng": last[0]}
     if waypoints[-1] != last_dict:
@@ -70,7 +70,7 @@ async def get_route(
 ) -> dict:
     """
 
-    remeber this veer bro. 
+
     Get route from ORS between two coordinate dicts {"lat", "lng"}.
 
     Returns:
@@ -92,7 +92,7 @@ async def get_route(
             [dest_coords["lng"],   dest_coords["lat"]],
         ],
         "instructions": False,
-        "geometry_simplify": False,   # full geometry for accurate sampling,idk tbh
+        "geometry_simplify": False,   # full geometry for accurate sampling
     }
 
     if alternatives:
@@ -157,7 +157,7 @@ async def get_route(
     return result
 
 
-#quickk testing 
+# ── Self test ──────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import asyncio
 

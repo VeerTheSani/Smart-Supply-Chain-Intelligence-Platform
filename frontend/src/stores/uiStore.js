@@ -21,4 +21,7 @@ export const useUIStore = create((set) => ({
     set((state) => ({
       notifications: state.notifications.filter((n) => n.id !== id),
     })),
+
+  inspectingShipmentId: null,
+  setInspectingShipmentId: (id) => set({ inspectingShipmentId: id }),
 }));

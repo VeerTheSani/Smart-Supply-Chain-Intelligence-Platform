@@ -9,6 +9,9 @@ import { useAlertWebSocket } from '../hooks/useAlertWebSocket';
 import { Toaster } from 'react-hot-toast';
 import { useShipments } from '../hooks/useShipments';
 import { useShipmentStore } from '../stores/shipmentStore';
+import ShipmentDetailPanel from '../components/ui/ShipmentDetailPanel';
+import DecisionPanel from '../components/ui/DecisionPanel';
+import { useState } from 'react';
 /**
  * Root layout — sidebar + header + animated page content.
  * Content area shifts based on sidebar collapsed state.
@@ -19,15 +22,20 @@ const RootLayout = memo(function RootLayout() {
   // Initiate Global WebSockets
   useAlertWebSocket();
 
+  const { inspectingShipmentId, setInspectingShipmentId } = useUIStore();
+  const [rerouteId, setRerouteId] = useState(null);
+
   // GLOBAL SYNC: React Query Server State -> Zustand Local State
   const { data: activeShipments } = useShipments();
-  const setShipments = useShipmentStore(state => state.setShipments);
+  const { shipments, setShipments } = useShipmentStore();
 
   useEffect(() => {
     if (activeShipments) {
       setShipments(activeShipments);
     }
   }, [activeShipments, setShipments]);
+
+  const selectedShipment = shipments.find(s => s.id === inspectingShipmentId);
 
   return (
     <div className="min-h-screen bg-theme-primary">
@@ -51,6 +59,16 @@ const RootLayout = memo(function RootLayout() {
           </motion.div>
         </main>
       </motion.div>
+
+      {/* Global Modals */}
+      {selectedShipment && (
+        <ShipmentDetailPanel
+          shipment={selectedShipment}
+          onClose={() => setInspectingShipmentId(null)}
+          onReroute={(id) => setRerouteId(id)}
+        />
+      )}
+      <DecisionPanel shipmentId={rerouteId} onClose={() => setRerouteId(null)} />
     </div>
   );
 });

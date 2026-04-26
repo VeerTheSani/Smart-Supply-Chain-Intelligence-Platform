@@ -36,9 +36,21 @@ export const ENDPOINTS = {
   DISRUPTIONS: '/api/disruptions',
   DISRUPTION_BY_ID: (id) => `/api/disruptions/${id}`,
 
+  // Cascade Dependencies
+  CASCADE_BY_SHIPMENT: (id) => `/api/shipments/${id}/cascade`,
+
+  // Countdown
+  COUNTDOWNS: '/api/countdowns',
+  COUNTDOWN_CANCEL: (id) => `/api/countdown/${id}/cancel`,
+
   // Analytics
   ANALYTICS_OVERVIEW: '/api/analytics/overview',
   ANALYTICS_TRENDS: '/api/analytics/trends',
+
+  // Notifications
+  NOTIFICATIONS: '/api/notifications',
+  NOTIFICATION_READ: (id) => `/api/notifications/${id}/read`,
+  NOTIFICATION_MARK_ALL_READ: '/api/notifications/mark-all-read',
 
   // Real-time
   WS_UPDATES: '/ws/updates',

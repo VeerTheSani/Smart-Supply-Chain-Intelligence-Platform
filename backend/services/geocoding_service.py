@@ -1,4 +1,5 @@
-
+# services/geocoding_service.py
+# Forward geocodes place names to coordinates using Nominatim.
 import httpx
 import logging
 
@@ -7,7 +8,7 @@ logger = logging.getLogger(__name__)
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 HEADERS = {"User-Agent": "SmartSupplyChain/1.0"}  # Nominatim requires a User-Agent
 
-## givs coordinates of orign and destination by names
+# Convert place names to lat/lng coordinates
 
 async def geocode(place_name: str) -> dict:
 
@@ -19,7 +20,7 @@ async def geocode(place_name: str) -> dict:
                     "q": place_name,
                     "format": "json",
                     "limit": 1,
-                    "countrycodes": "in",  # restrictng to ind for now , maybe wehen in q=wfaam we vaplafmaew f brainrot is caching up
+                    "countrycodes": "in",  # restrict to India
                 },
                 headers=HEADERS,
             )

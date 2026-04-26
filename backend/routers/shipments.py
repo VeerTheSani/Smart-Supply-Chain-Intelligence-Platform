@@ -89,7 +89,7 @@ async def _get_or_404(id: str) -> dict:
 
 # ── POST /api/shipments ────────────────────────────────────────────────────────
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 async def create_shipment(data: ShipmentCreate):
     """
     Create a new shipment:
@@ -189,7 +189,7 @@ async def create_shipment(data: ShipmentCreate):
 
 # ── GET /api/shipments ─────────────────────────────────────────────────────────
 
-@router.get("/")
+@router.get("")
 async def list_shipments(status: Optional[str] = Query(None)):
     query = {}
     if status:

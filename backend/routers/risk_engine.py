@@ -1,4 +1,9 @@
-# services/risk_engine.py
+# routers/risk_engine.py
+# Central risk calculation engine.
+# Computes a weighted risk score from 5 factors:
+#   weather, traffic, events, time_buffer, historical
+# Returns structured breakdown with per-factor contribution.
+
 import logging
 import math
 from datetime import datetime, timezone
@@ -8,6 +13,7 @@ from services.weather_service import score_weather_along_route
 from services.mappls_service import get_route
 from services.gemini_service import get_route_events
 from services.segment_service import get_cities_ahead
+from services.cache import weather_cache, traffic_cache
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +55,7 @@ def _haversine_km(lat1, lng1, lat2, lng2) -> float:
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-# weathering 
+# ── 1. Weather ─────────────────────────────────────────────────────────────────
 
 def _build_timed_waypoints(
     waypoints: list[dict],
@@ -76,12 +82,32 @@ async def _compute_weather_score(
     waypoints, current_location, origin_coords, eta_seconds, total_distance_km
 ) -> dict:
     try:
+        # Build cache key from first and last waypoint + eta
+        cache_key = None
+        if waypoints and len(waypoints) >= 2:
+            first_wp = waypoints[0]
+            last_wp = waypoints[-1]
+            cache_key = f"weather:{first_wp['lat']:.2f},{first_wp['lng']:.2f}:{last_wp['lat']:.2f},{last_wp['lng']:.2f}"
+
+        # Check cache first
+        if cache_key:
+            cached = weather_cache.get(cache_key)
+            if cached is not None:
+                logger.debug(f"Weather cache hit: {cache_key}")
+                return cached
+
         timed = _build_timed_waypoints(
             waypoints, current_location, origin_coords,
             eta_seconds, total_distance_km
         )
         result = await score_weather_along_route(timed)
-        return {"score": result["score"], "reason": result["reason"], "weight": WEIGHTS["weather"]}
+        score_data = {"score": result["score"], "reason": result["reason"], "weight": WEIGHTS["weather"]}
+
+        # Cache the result
+        if cache_key:
+            weather_cache.set(cache_key, score_data)
+
+        return score_data
     except Exception as e:
         logger.error(f"Weather scoring failed: {e}")
         return {"score": 50, "reason": "Weather data unavailable", "weight": WEIGHTS["weather"]}
@@ -92,6 +118,16 @@ async def _compute_weather_score(
 async def _compute_traffic_score(current_location: dict, dest_coords: dict) -> dict:
     try:
         start = current_location or dest_coords
+
+        # Build cache key from start + destination
+        cache_key = f"traffic:{start['lat']:.2f},{start['lng']:.2f}:{dest_coords['lat']:.2f},{dest_coords['lng']:.2f}"
+
+        # Check cache first
+        cached = traffic_cache.get(cache_key)
+        if cached is not None:
+            logger.debug(f"Traffic cache hit: {cache_key}")
+            return cached
+
         route = await get_route(start, dest_coords)
         traffic_ratio = route.get("traffic_ratio", 1.0)
         score = _threshold(traffic_ratio, TRAFFIC_THRESHOLDS)
@@ -102,12 +138,17 @@ async def _compute_traffic_score(current_location: dict, dest_coords: dict) -> d
         elif traffic_ratio < 2.0:     desc = "Heavy traffic"
         else:                         desc = "Gridlock"
 
-        return {
+        score_data = {
             "score":         score,
             "reason":        f"{desc} ({traffic_ratio}x slower than normal)",
             "weight":        WEIGHTS["traffic"],
             "traffic_ratio": traffic_ratio,
         }
+
+        # Cache the result
+        traffic_cache.set(cache_key, score_data)
+
+        return score_data
     except Exception as e:
         logger.error(f"Traffic scoring failed: {e}")
         return {"score": 50, "reason": "Traffic data unavailable", "weight": WEIGHTS["traffic"], "traffic_ratio": None}
@@ -122,21 +163,19 @@ async def _compute_event_score(
     current_location: dict,
     road_names: list[str],
     eta_seconds: int,
-    skip_gemini: bool = False,        # ← add this parameter
-    cached_event_score: dict = None,  # ← and this
+    skip_gemini: bool = False,
+    cached_event_score: dict = None,
 ) -> dict:
     try:
-        # Skip Gemini if TTL not reached 
+        # Skip Gemini if TTL not reached
         if skip_gemini and cached_event_score:
             return {
                 **cached_event_score,
                 "reason": cached_event_score.get("reason", "") + " (cached)",
             }
 
-        # rest of my code 
         ahead = get_cities_ahead(named_waypoints, current_location)
 
-        # named_waypoints have "city" key from Nominatim reverse geocoding, i am dooing reserse pyschologoy hehe
         city_names = list(dict.fromkeys([
             wp.get("city", "")
             for wp in ahead
@@ -165,7 +204,7 @@ async def _compute_event_score(
         return {"score": 0, "reason": "Event analysis unavailable", "weight": WEIGHTS["events"], "events_found": []}
 
 
-# time buffer
+# ── 4. Time Buffer ─────────────────────────────────────────────────────────────
 
 def _compute_time_buffer_score(created_at: datetime, eta_seconds: Optional[int]) -> dict:
     if not eta_seconds or eta_seconds <= 0:
@@ -194,14 +233,19 @@ def _compute_time_buffer_score(created_at: datetime, eta_seconds: Optional[int])
     }
 
 
-# historycal data, pathetical value but still has some wetightage , i like it tbh
+# ── 5. Historical ─────────────────────────────────────────────────────────────
 
 def _compute_historical_score() -> dict:
     return {"score": 0, "reason": "No historical data", "weight": WEIGHTS["historical"]}
 
 
-#main masalaa , with protin tube with white soas
+# ── Main risk calculation ──────────────────────────────────────────────────────
+
 async def calculate_risk(shipment: dict) -> dict:
+    """
+    Calculate comprehensive risk score for a shipment.
+    Returns structured breakdown with per-factor contribution values.
+    """
     origin_coords    = shipment.get("origin_coords", {})
     dest_coords      = shipment.get("destination_coords", {})
     current_location = shipment.get("current_location") or origin_coords
@@ -213,11 +257,11 @@ async def calculate_risk(shipment: dict) -> dict:
     eta_seconds      = shipment.get("expected_travel_seconds")
     distance_km      = shipment.get("distance_km", 0)
     created_at       = shipment.get("created_at", datetime.now(timezone.utc))
-
+ 
     if isinstance(created_at, str):
         created_at = datetime.fromisoformat(created_at)
 
-    # gemini cache checking
+    # Gemini cache checking
     last_assessment  = shipment.get("last_risk_assessment") or {}
     cached_events    = (last_assessment.get("breakdown") or {}).get("events")
     skip_gemini      = shipment.get("_skip_gemini", False)
@@ -238,8 +282,23 @@ async def calculate_risk(shipment: dict) -> dict:
 
     time_buffer_data = _compute_time_buffer_score(created_at, eta_seconds)
     historical_data  = _compute_historical_score()
+    
+    # Apply simulation overrides if present
+    simulated_scenario = shipment.get("_simulated_scenario")
+    simulated_severity = shipment.get("_simulated_severity", "medium")
+    
+    if simulated_scenario == "storm":
+        score = 90 if simulated_severity == "high" else 70 if simulated_severity == "medium" else 50
+        weather_data = {"score": score, "reason": "Simulated Storm", "weight": WEIGHTS["weather"]}
+    elif simulated_scenario == "traffic":
+        score = 85 if simulated_severity == "high" else 65 if simulated_severity == "medium" else 45
+        traffic_data = {"score": score, "reason": "Simulated Traffic", "weight": WEIGHTS["traffic"]}
+    elif simulated_scenario == "blockage":
+        score = 95 if simulated_severity == "high" else 75 if simulated_severity == "medium" else 55
+        event_data = {"score": score, "reason": "Simulated Blockage", "weight": WEIGHTS["events"]}
 
-    breakdown = {
+    # Build raw breakdown
+    raw_breakdown = {
         "weather":     weather_data,
         "traffic":     traffic_data,
         "time_buffer": time_buffer_data,
@@ -247,9 +306,18 @@ async def calculate_risk(shipment: dict) -> dict:
         "historical":  historical_data,
     }
 
-    final_score    = round(sum(d["score"] * d["weight"] for d in breakdown.values()), 2)
+    final_score    = round(sum(d["score"] * d["weight"] for d in raw_breakdown.values()), 2)
     risk_level     = _risk_level(final_score)
-    primary_driver = max(breakdown, key=lambda k: breakdown[k]["score"] * breakdown[k]["weight"])
+    primary_driver = max(raw_breakdown, key=lambda k: raw_breakdown[k]["score"] * raw_breakdown[k]["weight"])
+
+    # Build enriched breakdown with contribution values
+    breakdown = {}
+    for factor_name, factor_data in raw_breakdown.items():
+        contribution = round(factor_data["score"] * factor_data["weight"], 2)
+        breakdown[factor_name] = {
+            **factor_data,
+            "contribution": contribution,
+        }
 
     logger.info(f"Risk: {final_score} | {risk_level} | driver={primary_driver}")
 

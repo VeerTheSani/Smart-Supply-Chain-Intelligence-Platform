@@ -1,7 +1,7 @@
 # services/segment_service.py
 # Reverse geocodes each waypoint to get the actual city/town name.
 # Called once at shipment creation — results stored in MongoDB.
-# Gives Gemini real place names instead of random coordinates.
+# Provides real place names for route analysis.
 
 import httpx
 import asyncio
@@ -26,7 +26,7 @@ async def _reverse_geocode(lat: float, lng: float) -> str:
                     "lat": lat,
                     "lon": lng,
                     "format": "json",
-                    "zoom": 7,        
+                    "zoom": 7,
                     "addressdetails": 1,
                 },
                 headers=HEADERS,
@@ -36,7 +36,7 @@ async def _reverse_geocode(lat: float, lng: float) -> str:
 
         address = data.get("address", {})
 
-        # I am trying to get something out of this if not this, then this, we can go deep down as much as we want right veer?
+        # Fallback chain: try progressively broader location names
         name = (
            address.get("city") or
            address.get("town") or
@@ -69,9 +69,11 @@ async def get_named_waypoints(waypoints: list[dict]) -> list[dict]:
         return {**wp, "city": city or f"{wp['lat']:.2f},{wp['lng']:.2f}"}
 
     results = await asyncio.gather(*[
-        enrich(wp, delay=i * 0.5)   # 0.5s between each call ebcause this stupid nomiantion is hititng god damn limit 
+        enrich(wp, delay=i * 0.5)   # 0.5s stagger to respect Nominatim rate limits
         for i, wp in enumerate(waypoints)
     ])
+
+    return list(results)
 
 
 def get_city_names(named_waypoints: list[dict]) -> list[str]:

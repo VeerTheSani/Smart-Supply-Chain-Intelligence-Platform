@@ -28,22 +28,23 @@ const StatCard = memo(function StatCard({ title, value, icon: Icon, trend, color
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay }}
-      className={`bg-theme-secondary rounded-2xl p-6 border-default shadow-md border-b-4 ${colorClass}`}
+      transition={{ delay, duration: 0.5 }}
+      whileHover={{ y: -4, transition: { duration: 0.2 } }}
+      className={`glass-panel rounded-2xl p-6 border-l-4 shadow-xl transition-all ${colorClass.replace('border-', 'border-l-')}`}
     >
       <div className="flex justify-between items-start">
         <div className="space-y-4">
-          <p className="text-theme-secondary text-sm font-semibold tracking-wider uppercase">{title}</p>
+          <p className="text-theme-secondary text-[10px] font-bold tracking-[0.2em] uppercase opacity-70">{title}</p>
           <div className="flex items-end gap-3">
-            <h3 className="text-4xl font-bold text-theme-primary tracking-tight">{value}</h3>
+            <h3 className="text-4xl font-black text-theme-primary tracking-tight leading-none">{value}</h3>
             {trend && (
-              <span className={`flex items-center gap-1 text-sm font-medium pb-1 ${trend > 0 ? 'text-success' : 'text-danger'}`}>
-                {trend > 0 ? '+' : ''}{trend}% <TrendingUp className="w-3 h-3" />
+              <span className={`flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full ${trend > 0 ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'}`}>
+                {trend > 0 ? '↑' : '↓'}{Math.abs(trend)}%
               </span>
             )}
           </div>
         </div>
-        <div className={`p-3 rounded-xl bg-theme-tertiary shadow-inner ${colorClass.replace('border-', 'text-')}`}>
+        <div className={`p-3 rounded-2xl bg-theme-tertiary/50 shadow-inner ${colorClass.replace('border-', 'text-')}`}>
           <Icon className="w-6 h-6" />
         </div>
       </div>
@@ -168,16 +169,16 @@ const Dashboard = memo(function Dashboard() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.6 }}
-        className="glass-panel rounded-3xl overflow-hidden border border-theme shadow-2xl flex flex-col"
+        className="glass-panel rounded-3xl overflow-hidden border border-theme shadow-2xl flex flex-col bg-theme-secondary/30 backdrop-blur-md"
       >
-        <div className="px-6 py-4 border-b border-theme bg-theme-secondary/30 flex justify-between items-center z-10 relative">
-          <h2 className="text-lg font-bold text-theme-primary flex items-center gap-2">
-            <Navigation className="w-5 h-5 text-accent" /> Live Shipment Tracking
+        <div className="px-6 py-5 border-b border-theme/50 bg-theme-secondary/20 flex justify-between items-center z-10 relative">
+          <h2 className="text-xl font-black text-theme-primary flex items-center gap-3 tracking-tight">
+            <Navigation className="w-6 h-6 text-accent animate-pulse" /> Global Fleet Intelligence
           </h2>
-          <div className="flex gap-4 text-[10px] uppercase font-bold tracking-widest bg-theme-primary/50 px-3 py-1.5 rounded-lg border border-theme">
-            <span className="flex items-center gap-1.5 text-success"><div className="w-2.5 h-2.5 rounded-full bg-success shadow-sm shadow-success/50"></div> Safe</span>
-            <span className="flex items-center gap-1.5 text-warning"><div className="w-2.5 h-2.5 rounded-full bg-warning shadow-sm shadow-warning/50"></div> Warning</span>
-            <span className="flex items-center gap-1.5 text-danger"><div className="w-2.5 h-2.5 rounded-full bg-danger shadow-sm shadow-danger/50"></div> High Risk</span>
+          <div className="flex gap-4 text-[9px] uppercase font-black tracking-[0.2em] bg-theme-primary/80 px-4 py-2 rounded-xl border border-theme shadow-lg backdrop-blur-sm">
+            <span className="flex items-center gap-2 text-success"><div className="w-2 h-2 rounded-full bg-success shadow-[0_0_8px_rgba(34,197,94,0.5)]"></div> Nominal</span>
+            <span className="flex items-center gap-2 text-warning"><div className="w-2 h-2 rounded-full bg-warning shadow-[0_0_8px_rgba(250,204,21,0.5)]"></div> Warning</span>
+            <span className="flex items-center gap-2 text-danger"><div className="w-2 h-2 rounded-full bg-danger shadow-[0_0_8px_rgba(239,68,68,0.5)]"></div> Critical</span>
           </div>
         </div>
 
@@ -284,20 +285,30 @@ const Dashboard = memo(function Dashboard() {
           </MapContainer>
 
           {/* 🔥 LIVE SUMMARY */}
-          <div className="absolute top-4 right-4 bg-theme-secondary/90 p-4 rounded-xl w-52 z-[1000] border border-theme text-xs shadow-lg">
-            <h3 className="font-bold mb-2 text-theme-primary">Live Status</h3>
+          <div className="absolute top-6 right-6 bg-theme-secondary/90 p-5 rounded-2xl w-60 z-[1000] border border-theme shadow-2xl backdrop-blur-md">
+            <h3 className="font-black text-[10px] uppercase tracking-[0.2em] mb-3 text-theme-secondary">System Pulse</h3>
 
             {highRiskCount > 0 ? (
-              <p className="text-danger font-bold">
-                ⚠ {highRiskCount} shipment needs attention
-              </p>
+              <div className="space-y-1">
+                <p className="text-danger font-black text-sm flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4" /> {highRiskCount} CRITICAL ALERTS
+                </p>
+                <p className="text-[10px] text-theme-secondary font-medium">Immediate intervention required</p>
+              </div>
             ) : (
-              <p className="text-success">✔ All shipments running smoothly</p>
+              <div className="space-y-1">
+                <p className="text-success font-black text-sm flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4" /> ALL SYSTEMS NOMINAL
+                </p>
+                <p className="text-[10px] text-theme-secondary font-medium">Global operations stable</p>
+              </div>
             )}
 
-            <p className="mt-2 text-theme-secondary text-[11px]">
-              Total Active: {shipments.length}
-            </p>
+            <div className="mt-4 pt-4 border-t border-theme border-dashed">
+              <p className="text-theme-primary text-[10px] font-bold tracking-wider">
+                ACTIVE SHIPMENTS: {shipments.length}
+              </p>
+            </div>
           </div>
 
         </div>

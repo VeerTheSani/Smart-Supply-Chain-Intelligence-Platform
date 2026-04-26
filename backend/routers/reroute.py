@@ -116,8 +116,15 @@ async def get_reroute(id: str):
     if not shipment:
         raise HTTPException(status_code=404, detail="Shipment not found")
 
+    # Validation: reject delivered shipments
+    if shipment.get("status") == "delivered":
+        raise HTTPException(status_code=400, detail="Cannot reroute a delivered shipment")
+
     if not shipment.get("destination_coords"):
         raise HTTPException(status_code=400, detail="Shipment missing destination coordinates")
+
+    if not shipment.get("route_waypoints"):
+        raise HTTPException(status_code=400, detail="Shipment has no route waypoints — route not computed yet")
 
     try:
         result = await get_alternatives(shipment)

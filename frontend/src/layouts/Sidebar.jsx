@@ -10,6 +10,7 @@ import {
   Settings,
   ChevronLeft,
   Zap,
+  FlaskConical,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useUIStore } from '../stores/uiStore';
@@ -20,6 +21,7 @@ const NAV_ITEMS = [
   { path: '/disruptions', label: 'Disruptions', icon: AlertTriangle },
   { path: '/routes', label: 'Routes', icon: Route },
   { path: '/analytics', label: 'Analytics', icon: BarChart3 },
+  { path: '/scenario-lab', label: 'Scenario Lab', icon: FlaskConical },
   { path: '/settings', label: 'Settings', icon: Settings },
 ];
 
@@ -32,16 +34,22 @@ const SidebarLink = memo(function SidebarLink({ item, collapsed }) {
     <NavLink
       to={item.path}
       className={cn(
-        'group flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200',
+        'group flex items-center gap-3 px-4 py-3 rounded-2xl text-[13px] font-bold transition-all duration-300 relative overflow-hidden',
         isActive
-          ? 'bg-accent/15 text-accent shadow-glow'
-          : 'text-theme-secondary hover:text-theme-primary hover:bg-theme-tertiary'
+          ? 'bg-accent text-white shadow-xl shadow-accent/20'
+          : 'text-theme-secondary hover:text-theme-primary hover:bg-theme-tertiary/80'
       )}
     >
+      {isActive && (
+        <motion.div
+          layoutId="sidebar-bg"
+          className="absolute inset-0 bg-gradient-to-r from-accent to-accent/90 -z-10"
+        />
+      )}
       <Icon
         className={cn(
-          'w-5 h-5 shrink-0 transition-colors',
-          isActive ? 'text-accent' : 'text-theme-secondary group-hover:text-theme-primary'
+          'w-5 h-5 shrink-0 transition-transform duration-300 group-hover:scale-110',
+          isActive ? 'text-white' : 'text-theme-secondary group-hover:text-accent'
         )}
       />
       <AnimatePresence mode="wait">
@@ -89,17 +97,17 @@ const Sidebar = memo(function Sidebar() {
         <AnimatePresence mode="wait">
           {!collapsed && (
             <motion.div
-              initial={{ opacity: 0, width: 0 }}
-              animate={{ opacity: 1, width: 'auto' }}
-              exit={{ opacity: 0, width: 0 }}
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -10 }}
               transition={{ duration: 0.2 }}
               className="overflow-hidden"
             >
-              <h1 className="text-sm font-bold gradient-text whitespace-nowrap">
-                Smart Supply Chain
+              <h1 className="text-[13px] font-black tracking-tight text-theme-primary whitespace-nowrap">
+                SMART <span className="text-accent">SUPPLY</span>
               </h1>
-              <p className="text-[10px] text-theme-secondary whitespace-nowrap">
-                Real-Time Intelligence
+              <p className="text-[9px] font-black uppercase tracking-[0.2em] text-theme-secondary/60 whitespace-nowrap">
+                Intelligence Platform
               </p>
             </motion.div>
           )}
