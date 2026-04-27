@@ -16,41 +16,8 @@ async def get_dashboard():
     """
     shipments = await db.shipments.find({}).sort("created_at", -1).to_list(100)
 
-    serialized = []
-    for s in shipments:
-        s["id"] = str(s.pop("_id"))
-
-        # Add frontend compat aliases
-        s.setdefault("origin",           s.get("origin_name", ""))
-        s.setdefault("destination",      s.get("destination_name", ""))
-        s.setdefault("tracking_number",  s.get("shipment_name", s.get("id", "")[:8].upper()))
-        s.setdefault("conditions",       {"weather": "clear", "traffic": "low"})
-
-        # Build risk.current shape
-        last = s.get("last_risk_assessment")
-        if last:
-            driver = last.get("primary_driver", "weather")
-            reason = (last.get("breakdown") or {}).get(driver, {}).get("reason", "")
-            s["risk"] = {
-                "current": {
-                    "risk_level": last.get("risk_level", "low").lower(),
-                    "risk_score": last.get("final_score", 0),
-                    "reason":     reason,
-                    "timestamp":  last.get("computed_at", ""),
-                },
-                "history": []
-            }
-        else:
-            s["risk"] = {
-                "current": {
-                    "risk_level": "low",
-                    "risk_score": 0,
-                    "reason":     "Initial assessment pending",
-                },
-                "history": []
-            }
-
-        serialized.append(s)
+    from routers.shipments import _serialize
+    serialized = [_serialize(s) for s in shipments]
 
     # ── Stats for dashboard stat cards ────────────────────────────────────────
     total_shipments = len(serialized)
