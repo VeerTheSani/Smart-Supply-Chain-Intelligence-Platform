@@ -39,6 +39,13 @@ def _serialize(doc: dict) -> dict:
     doc.setdefault("destination", doc.get("destination_name", ""))
     doc.setdefault("tracking_number", doc.get("shipment_name", doc.get("id", "")[:8].upper()))
 
+    # CRITICAL TIMEZONE FIX: MongoDB strips tzinfo. Force UTC so Javascript doesn't interpret it as local Indian Standard Time (+05:30 offset drift)
+    for field in ["created_at", "updated_at"]:
+        if field in doc and isinstance(doc[field], datetime):
+            if doc[field].tzinfo is None:
+                doc[field] = doc[field].replace(tzinfo=timezone.utc)
+            doc[field] = doc[field].isoformat()
+
     # Her frontend expects: conditions.weather, conditions.traffic
     doc.setdefault("conditions", {"weather": "clear", "traffic": "low"})
     if not doc.get("route_incidents"):
@@ -268,6 +275,10 @@ async def update_shipment(id: str, data: ShipmentUpdate):
         }
     if data.status is not None:
         updates["status"] = data.status
+        if data.status == "in_transit":
+            # Force reset simulation timestamp so the vehicle physically departs from Origin line right now
+            updates["created_at"] = datetime.now(timezone.utc)
+            
     if data.auto_reroute_enabled is not None:
         updates["auto_reroute_enabled"] = data.auto_reroute_enabled
 

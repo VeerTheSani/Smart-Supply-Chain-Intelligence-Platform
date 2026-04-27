@@ -129,11 +129,45 @@ def _parse_incidents(raw: list[dict], waypoints: list[dict]) -> list[dict]:
         if incident_type in ("UNKNOWN", "LANE_CLOSED"):
             continue
 
+        import random
         description = (
             props.get("description")
             or props.get("shortDescription")
             or incident_type.replace("_", " ").title()
         )
+
+        # Enhance generic or sterile API descriptions for demo purposes
+        generic_match = incident_type.lower().replace("_", " ")
+        if description.lower() in [generic_match, "hazard", "road_hazard", "jam", "accident", "road works"]:
+            enhancements = {
+                "ACCIDENT": [
+                    "Multi-vehicle collision blocking two lanes.",
+                    "Overturned cargo truck causing severe bottleneck.",
+                    "Minor fender bender on the shoulder; rubbernecking delays."
+                ],
+                "JAM": [
+                    "Heavy standstill traffic due to rush hour volume.",
+                    "Unexpected severe bottleneck extending 4km.",
+                    "Stop-and-go conditions; average speed below 15km/h."
+                ],
+                "ROAD_HAZARD": [
+                    "Debris reported in the left lane.",
+                    "Large pothole causing vehicles to swerve erratically.",
+                    "Spilled construction material causing slick conditions."
+                ],
+                "HAZARD": [
+                    "Unidentified obstruction in the roadway.",
+                    "Stalled vehicle in the active travel lane.",
+                    "Emergency responders active on the shoulder."
+                ],
+                "ROAD_WORKS": [
+                    "Active lane closure for highway resurfacing.",
+                    "Bridge maintenance work reducing flow to one lane.",
+                    "Utility construction causing intermittent stoppages."
+                ]
+            }
+            fallbacks = enhancements.get(incident_type, [f"Active {generic_match} affecting route progress."])
+            description = random.choice(fallbacks)
 
         result.append({
             "lat":         lat,
@@ -226,24 +260,56 @@ async def fetch_and_store_incidents(shipment_id: str | ObjectId) -> list[dict]:
     """
     try:
         oid      = ObjectId(shipment_id) if isinstance(shipment_id, str) else shipment_id
-        shipment = await db.shipments.find_one({"_id": oid}, {"route_waypoints": 1, "route_geometry_encoded": 1})
+        shipment = await db.shipments.find_one({"_id": oid}, {"route_waypoints": 1, "route_geometry_encoded": 1, "status": 1, "created_at": 1, "expected_travel_seconds": 1})
         if not shipment:
             return []
 
         waypoints = shipment.get("route_waypoints", [])
         encoded   = shipment.get("route_geometry_encoded", "")
+        status    = shipment.get("status")
+        created_at = shipment.get("created_at")
+        eta_seconds = shipment.get("expected_travel_seconds")
 
         if len(waypoints) < 2:
             return []
 
-        # Sparse waypoints → generate bbox queries (few API calls)
-        # Dense decoded geometry → accurate corridor matching
-        dense_points = None
-        if encoded:
-            raw_coords   = _decode_polyline(encoded)
-            dense_points = [{"lat": c[1], "lng": c[0]} for c in raw_coords]
+        # Mathematically calculate dynamic slice of the road currently remaining!
+        progress = 0.0
+        if status == "delivered":
+            progress = 1.0
+        elif status == "planned":
+            progress = 0.0
+        elif created_at and eta_seconds:
+            if isinstance(created_at, str):
+                created_at = datetime.fromisoformat(created_at)
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            elapsed  = (datetime.now(timezone.utc) - created_at).total_seconds()
+            progress = min((elapsed * 5) / eta_seconds, 1.0)
 
-        incidents = await _fetch_tomtom_incidents(waypoints, corridor_points=dense_points)
+        # Truncate queries: only pull geometry physically IN FRONT of the truck!
+        dense_points = None
+        bbox_anchors = waypoints
+        
+        if encoded:
+            from core.mappls_service import _decode_polyline
+            raw_coords = _decode_polyline(encoded)
+            idx        = min(int(progress * len(raw_coords)), len(raw_coords) - 1)
+            active_coords = raw_coords[idx:] 
+            
+            if len(active_coords) > 0:
+               dense_points = [{"lat": c[1], "lng": c[0]} for c in active_coords]
+               
+               # Dynamically recreate BBOX anchors from only the active road ahead so TomTom doesn't pull trailing data
+               step = max(1, len(dense_points) // 10)
+               bbox_anchors = dense_points[::step]
+               if dense_points[-1] not in bbox_anchors:
+                   bbox_anchors.append(dense_points[-1])
+            else:
+               dense_points = [{"lat": waypoints[-1]["lat"], "lng": waypoints[-1]["lng"]}]
+               bbox_anchors = dense_points
+
+        incidents = await _fetch_tomtom_incidents(bbox_anchors, corridor_points=dense_points)
 
         # Only overwrite stored incidents if TomTom returned data.
         # An empty result likely means API failure (403/rate-limit), not a clear route —

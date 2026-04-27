@@ -55,20 +55,28 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
       reset();
       onClose();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Failed to create shipment. Please try again.');
+      let errMsg = 'Failed to create shipment. Please try again.';
+      if (err.response?.data?.detail) {
+        if (Array.isArray(err.response.data.detail)) {
+          errMsg = err.response.data.detail.map(e => e.msg || e.type).join(', ');
+        } else if (typeof err.response.data.detail === 'string') {
+          errMsg = err.response.data.detail;
+        }
+      }
+      toast.error(errMsg);
     }
   };
 
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-theme-primary/80 backdrop-blur-md">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-theme-primary/80 backdrop-blur-md transition-all">
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             transition={{ duration: 0.2 }}
-            className="bg-theme-secondary rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl border border-theme flex flex-col"
+            className="bg-theme-secondary rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl border border-theme flex flex-col relative"
           >
             {/* Header */}
             <div className="p-6 border-b border-theme flex items-center justify-between bg-theme-tertiary/30">
@@ -82,8 +90,10 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
                 </div>
               </div>
               <button
+                type="button"
                 onClick={onClose}
                 className="p-2 text-theme-secondary hover:text-theme-primary transition-colors rounded-xl hover:bg-theme-tertiary cursor-pointer"
+                disabled={isSubmitting}
               >
                 <X className="w-5 h-5" />
               </button>
@@ -212,17 +222,55 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
                     disabled={isSubmitting}
                     className="w-full flex items-center justify-center gap-2 py-3.5 bg-accent hover:bg-accent/80 text-white font-bold rounded-xl shadow-lg shadow-accent/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
                   >
-                    {isSubmitting ? (
-                      'Deploying Shipment...'
-                    ) : (
-                      <>
-                        <Plus className="w-5 h-5" /> Deploy Shipment
-                      </>
-                    )}
+                    <Plus className="w-5 h-5" /> Deploy Shipment
                   </button>
                 </div>
               </form>
             </div>
+
+            {/* Premium Glassmorphic Loading Overlay (Inside Modal) */}
+            {isSubmitting && (
+              <motion.div 
+                initial={{ opacity: 0 }} 
+                animate={{ opacity: 1 }} 
+                exit={{ opacity: 0 }}
+                className="absolute inset-0 z-50 bg-theme-secondary/80 backdrop-blur-sm flex flex-col items-center justify-center p-8 border border-theme"
+              >
+                <div className="relative w-16 h-16 mb-6">
+                   <div className="absolute inset-0 rounded-full border-4 border-theme-tertiary" />
+                   <div className="absolute inset-0 rounded-full border-4 border-accent border-t-transparent animate-spin shadow-[0_0_15px_rgba(59,130,246,0.5)]" />
+                </div>
+                <h3 className="text-lg font-black text-theme-primary mb-1 uppercase tracking-widest">Deploying Shipment</h3>
+                <p className="text-xs text-theme-secondary font-bold mb-8">Establishing systemic connections</p>
+                
+                <div className="w-full max-w-sm space-y-4">
+                  {[
+                    { id: 1, text: 'Resolving Geographic Waypoints', delay: 0 },
+                    { id: 2, text: 'Fetching Live Traffic & Incidents', delay: 2 },
+                    { id: 3, text: 'Aggregating Weather Predictions', delay: 4 },
+                    { id: 4, text: 'Executing AI Risk Engine', delay: 6 }
+                  ].map((s, idx) => (
+                    <div key={s.id} className="flex items-center gap-4 text-xs font-bold tracking-wide relative">
+                      {idx !== 3 && <div className="absolute left-[9px] top-4 w-[2px] h-6 bg-theme-tertiary -z-10" />}
+
+                      <div className="relative z-10 w-5 h-5 rounded-full flex items-center justify-center border transition-all duration-300 bg-theme-secondary border-theme-tertiary">
+                         <div className="w-2.5 h-2.5 rounded-full bg-accent absolute inset-0 m-auto opacity-0" style={{ animation: `premiumFadeIn 0.2s forwards ${s.delay}s` }} />
+                         <div className="w-2.5 h-2.5 rounded-full bg-accent absolute inset-0 m-auto animate-ping" style={{ animationDelay: `${s.delay}s`, animationDuration: '2s' }} />
+                      </div>
+                      <span className="text-theme-secondary flex-1 opacity-50" style={{ animation: `premiumColorShift 0.5s forwards ${s.delay}s` }}>
+                        {s.text}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                {/* Embedded style for the sequence faking */}
+                <style>{`
+                  @keyframes premiumFadeIn { to { opacity: 1; } }
+                  @keyframes premiumColorShift { to { opacity: 1; color: var(--color-theme-primary); } }
+                `}</style>
+              </motion.div>
+            )}
+
           </motion.div>
         </div>
       )}

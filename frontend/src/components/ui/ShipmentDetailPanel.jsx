@@ -152,7 +152,13 @@ const ShipmentDetailPanel = memo(function ShipmentDetailPanel({ shipment, onClos
               <div className="glass-panel rounded-2xl border border-theme p-4 text-center bg-theme-tertiary/10">
                 <p className="text-[9px] text-theme-secondary uppercase tracking-[0.15em] font-black opacity-50">ETA</p>
                 <p className="text-[11px] font-black text-theme-primary mt-2 uppercase tracking-widest">
-                  {shipment.eta_hours ? `${shipment.eta_hours}h` : '—'}
+                  {(() => {
+                    if (!shipment.eta_hours) return '—';
+                    const h = parseFloat(shipment.eta_hours);
+                    const d = Math.floor(h / 24);
+                    const remH = Math.floor(h % 24);
+                    return d > 0 ? `${d}d ${remH}h` : `${remH}h`;
+                  })()}
                 </p>
               </div>
             </div>

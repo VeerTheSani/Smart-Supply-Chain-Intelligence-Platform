@@ -37,7 +37,7 @@ export default function LocationAutocomplete({
       setIsLoading(true);
       try {
         const response = await fetch(
-          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&featuretype=city`,
+          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&countrycodes=in`,
           { headers: { 'Accept-Language': 'en' } }
         );
         const data = await response.json();

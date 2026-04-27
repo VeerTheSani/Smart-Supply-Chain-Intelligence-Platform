@@ -156,6 +156,9 @@ def _compute_event_score(stored_incidents: list[dict]) -> dict:
     highest_severity_inc = None
     max_inc_score = -1
 
+    from collections import Counter
+    counts = Counter(i.get("type", "UNKNOWN").replace("_", " ").title() for i in stored_incidents)
+
     for inc in stored_incidents:
         base = INCIDENT_SCORE_MAP.get(inc.get("type", ""), 5)
         mult = MAGNITUDE_MULT.get(inc.get("severity", 0), 1.0)
@@ -167,13 +170,24 @@ def _compute_event_score(stored_incidents: list[dict]) -> dict:
             highest_severity_inc = inc
 
     score  = min(round(total), 100)
-    reason = highest_severity_inc["description"] if highest_severity_inc else "No incidents on route"
+    
+    if highest_severity_inc:
+        count_strs = [f"{c} {t}{'s' if c > 1 and not t.endswith('s') else ''}" for t, c in counts.most_common()]
+        reason = f"{len(stored_incidents)} System Events ({', '.join(count_strs)}). Primary concern: {highest_severity_inc['description']}"
+        
+        events_found = [f"Total of {len(stored_incidents)} telemetry disruptions plotted on route"]
+        for t, c in counts.most_common():
+            events_found.append(f"{c} {t}{'s' if c > 1 and not t.endswith('s') else ''} recorded.")
+        events_found.append(f"Key Threat: {highest_severity_inc['description']}")
+    else:
+        reason = "No incidents on route"
+        events_found = []
 
     return {
         "score":          score,
         "reason":         reason,
         "weight":         WEIGHTS["events"],
-        "events_found":   [i["description"] for i in stored_incidents[:5]],
+        "events_found":   events_found,
         "incident_count": len(stored_incidents),
     }
 

@@ -3,12 +3,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { MapContainer, TileLayer, Polyline, Marker, useMap, CircleMarker, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import {
-  X, ActivitySquare, Clock, Route, ShieldAlert,
-  Zap, Shield, Star, CloudRain, CheckCircle2, TrendingUp, MapPin, AlertTriangle, Navigation
+import { X, ActivitySquare, Clock, Route, ShieldAlert,
+  Zap, Shield, Star, CloudRain, CheckCircle2, TrendingUp, MapPin, AlertTriangle, Navigation, RefreshCw
 } from 'lucide-react';
 import { useRerouting, useScoreReroute, useApplyReroute } from '../../hooks/useShipments';
 import { useShipmentStore } from '../../stores/shipmentStore';
+import { useTheme } from '../../context/ThemeContext';
 import LoadingSpinner from './LoadingSpinner';
 import toast from 'react-hot-toast';
 import { cn } from '../../lib/utils';
@@ -93,6 +93,15 @@ const riskBarColor = (level) => {
   }
 };
 
+const formatEtaModal = (seconds) => {
+  if (!seconds) return '0h';
+  const hours = seconds / 3600;
+  const d = Math.floor(hours / 24);
+  const h = Math.round(hours % 24);
+  if (d > 0) return `${d}d ${h}h`;
+  return `${hours.toFixed(1)}h`;
+};
+
 // ── Map sub-components ────────────────────────────────────────────────────────
 
 function FitAlts({ alternatives, primaryWaypoints }) {
@@ -128,7 +137,7 @@ const INCIDENT_COLOR = {
 
 const SEVERITY_LABELS = ['Unknown', 'Minor', 'Moderate', 'Major', 'Critical'];
 
-function RouteMapInner({ alternatives, primaryWaypoints, primaryGeometryEncoded, originCoords, destCoords, currentRoute, hoveredId, incidents }) {
+function RouteMapInner({ alternatives, primaryWaypoints, primaryGeometryEncoded, originCoords, destCoords, currentRoute, hoveredId, incidents, shipment }) {
   const currentPositions = primaryGeometryEncoded
     ? decodePolyline(primaryGeometryEncoded)
     : primaryWaypoints?.length > 1
@@ -137,9 +146,90 @@ function RouteMapInner({ alternatives, primaryWaypoints, primaryGeometryEncoded,
         ? [[originCoords.lat, originCoords.lng], [destCoords.lat, destCoords.lng]]
         : null;
 
+  const [liveLocation, setLiveLocation] = useState(null);
+
+  useEffect(() => {
+    if (!shipment?.created_at || !shipment?.expected_travel_seconds || !currentPositions || currentPositions.length < 2) return;
+
+    // Fast euclidean coordinate interpolator for visual map placement
+    const getInterpolatedPoint = (positions, progressFrac) => {
+      if (progressFrac <= 0) return positions[0];
+      if (progressFrac >= 1) return positions[positions.length - 1];
+      let totalDist = 0;
+      const dists = [];
+      for (let i = 0; i < positions.length - 1; i++) {
+         const dx = positions[i+1][1] - positions[i][1];
+         const dy = positions[i+1][0] - positions[i][0];
+         const d = Math.sqrt(dx*dx + dy*dy);
+         dists.push(d);
+         totalDist += d;
+      }
+      const targetDist = totalDist * progressFrac;
+      let currDist = 0;
+      for (let i = 0; i < positions.length - 1; i++) {
+         if (currDist + dists[i] >= targetDist) {
+            const segmentFrac = dists[i] === 0 ? 0 : (targetDist - currDist) / dists[i];
+            const lat = positions[i][0] + (positions[i+1][0] - positions[i][0]) * segmentFrac;
+            const lng = positions[i][1] + (positions[i+1][1] - positions[i][1]) * segmentFrac;
+            return [lat, lng];
+         }
+         currDist += dists[i];
+      }
+      return positions[positions.length - 1];
+    };
+
+    const updatePosition = () => {
+      if (shipment.status === 'planned') {
+         setLiveLocation(getInterpolatedPoint(currentPositions, 0));
+         return;
+      }
+      if (shipment.status === 'delivered') {
+         setLiveLocation(getInterpolatedPoint(currentPositions, 1));
+         return;
+      }
+
+      const created = new Date(shipment.created_at).getTime();
+      const elapsedSec = (Date.now() - created) / 1000;
+      const progress = Math.min((elapsedSec * 5) / shipment.expected_travel_seconds, 1);
+      setLiveLocation(getInterpolatedPoint(currentPositions, progress));
+    };
+
+    updatePosition();
+    const interval = setInterval(updatePosition, 1000); 
+    return () => clearInterval(interval);
+  }, [shipment, currentPositions]);
+
   return (
     <>
       <FitAlts alternatives={alternatives} primaryWaypoints={primaryWaypoints} />
+
+      {/* ── Live Moving Truck Marker ── */}
+      {liveLocation && (
+        <Marker 
+          position={liveLocation}
+          zIndexOffset={999}
+          icon={L.divIcon({
+            className: '',
+            iconSize: [32, 32],
+            iconAnchor: [16, 16],
+            html: `
+              <div class="relative w-full h-full flex items-center justify-center">
+                <div class="absolute inset-0 rounded-full bg-indigo-500 opacity-50 animate-ping"></div>
+                <div class="w-6 h-6 bg-indigo-600 rounded-full flex items-center justify-center border-2 border-theme shadow-[0_0_15px_rgba(79,70,229,0.9)] z-10">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="1" y="3" width="15" height="13"></rect>
+                    <polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon>
+                    <circle cx="5.5" cy="18.5" r="2.5"></circle>
+                    <circle cx="18.5" cy="18.5" r="2.5"></circle>
+                  </svg>
+                </div>
+              </div>
+            `
+          })}
+        >
+          <Tooltip direction="top" className="font-bold text-xs">Simulated Live Location</Tooltip>
+        </Marker>
+      )}
 
       {/* ── Current route — white/slate, clearly labelled ── */}
       {currentPositions && (
@@ -156,7 +246,7 @@ function RouteMapInner({ alternatives, primaryWaypoints, primaryGeometryEncoded,
               <span style={{ fontSize: 11, fontWeight: 700 }}>
                 Current Route
                 {currentRoute?.distance ? ` · ${currentRoute.distance.toFixed(0)} km` : ''}
-                {currentRoute?.eta ? ` · ${(currentRoute.eta / 3600).toFixed(1)} hrs` : ''}
+                {currentRoute?.eta ? ` · ${formatEtaModal(currentRoute.eta)}` : ''}
               </span>
             </Tooltip>
           </Polyline>
@@ -188,7 +278,7 @@ function RouteMapInner({ alternatives, primaryWaypoints, primaryGeometryEncoded,
           >
             <Tooltip sticky direction="top">
               <span style={{ fontSize: 11, fontWeight: 700 }}>
-                {alt.label} · {alt.distance?.toFixed(0)} km · {((alt.eta ?? alt.duration_seconds ?? 0) / 3600).toFixed(1)} hrs
+                {alt.label} · {alt.distance?.toFixed(0)} km · {formatEtaModal(alt.eta ?? alt.duration_seconds)}
               </span>
             </Tooltip>
           </Polyline>
@@ -197,28 +287,34 @@ function RouteMapInner({ alternatives, primaryWaypoints, primaryGeometryEncoded,
 
       {/* ── Origin marker ── */}
       {originCoords && (
-        <CircleMarker
-          center={[originCoords.lat, originCoords.lng]}
-          radius={6}
-          pathOptions={{ color: '#22c55e', fillColor: '#0f172a', fillOpacity: 1, weight: 2.5 }}
+        <Marker
+          position={[originCoords.lat, originCoords.lng]}
+          icon={L.icon({
+            iconUrl: '/stoppointIcon.webp',
+            iconSize: [28, 28],
+            iconAnchor: [14, 28] // assumes a pin-style icon, anchors bottom-center
+          })}
         >
           <Tooltip direction="top" permanent={false}>
-            <span style={{ fontSize: 11 }}>📦 Origin</span>
+            <span style={{ fontSize: 11, fontWeight: 'bold' }}>📦 Origin</span>
           </Tooltip>
-        </CircleMarker>
+        </Marker>
       )}
 
       {/* ── Destination marker ── */}
       {destCoords && (
-        <CircleMarker
-          center={[destCoords.lat, destCoords.lng]}
-          radius={6}
-          pathOptions={{ color: '#ef4444', fillColor: '#0f172a', fillOpacity: 1, weight: 2.5 }}
+        <Marker
+          position={[destCoords.lat, destCoords.lng]}
+          icon={L.icon({
+            iconUrl: '/stoppointIcon.webp',
+            iconSize: [28, 28],
+            iconAnchor: [14, 28] // anchors bottom-center
+          })}
         >
           <Tooltip direction="top" permanent={false}>
-            <span style={{ fontSize: 11 }}>🏁 Destination</span>
+            <span style={{ fontSize: 11, fontWeight: 'bold' }}>🏁 Destination</span>
           </Tooltip>
-        </CircleMarker>
+        </Marker>
       )}
 
       {/* ── Incidents on current route — banner style ── */}
@@ -260,11 +356,11 @@ function RouteMapInner({ alternatives, primaryWaypoints, primaryGeometryEncoded,
   );
 }
 
-function RouteMap({ alternatives, primaryWaypoints, primaryGeometryEncoded, originCoords, destCoords, currentRoute, hoveredId, incidents }) {
+function RouteMap({ alternatives, primaryWaypoints, primaryGeometryEncoded, originCoords, destCoords, currentRoute, hoveredId, incidents, theme }) {
   if (!alternatives?.length) return null;
 
   return (
-    <div className="relative rounded-xl overflow-hidden border border-white/[0.07] shadow-inner" style={{ height: 240 }}>
+    <div className="relative rounded-xl overflow-hidden border border-theme shadow-inner" style={{ height: 240 }}>
       <MapContainer
         center={[22, 79]}
         zoom={5}
@@ -273,7 +369,7 @@ function RouteMap({ alternatives, primaryWaypoints, primaryGeometryEncoded, orig
         style={{ height: '100%', width: '100%' }}
         attributionControl={false}
       >
-        <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
+        <TileLayer url={theme === "light" ? "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" : "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"} />
         <RouteMapInner
           alternatives={alternatives}
           primaryWaypoints={primaryWaypoints}
@@ -287,10 +383,10 @@ function RouteMap({ alternatives, primaryWaypoints, primaryGeometryEncoded, orig
       </MapContainer>
 
       {/* Legend */}
-      <div className="absolute bottom-2 left-2 z-[800] flex flex-col gap-1 bg-black/70 backdrop-blur-sm px-2.5 py-2 rounded-lg border border-white/10 pointer-events-none">
+      <div className="absolute bottom-2 left-2 z-[800] flex flex-col gap-1 bg-theme-secondary/80 backdrop-blur-sm px-2.5 py-2 rounded-lg border border-theme pointer-events-none">
         <div className="flex items-center gap-1.5">
           <svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="#94a3b8" strokeWidth="2" strokeDasharray="5 7" /></svg>
-          <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Your route</span>
+          <span className="text-[9px] text-theme-secondary font-bold uppercase tracking-wider">Your route</span>
         </div>
         {Object.entries(ROUTE_META).map(([label, meta]) => (
           <div key={label} className="flex items-center gap-1.5">
@@ -308,7 +404,7 @@ function RouteMap({ alternatives, primaryWaypoints, primaryGeometryEncoded, orig
         ))}
       </div>
 
-      <div className="absolute top-2 right-2 z-[800] text-[9px] text-slate-600 bg-black/50 px-2 py-1 rounded-md border border-white/[0.06] pointer-events-none">
+      <div className="absolute top-2 right-2 z-[800] text-[9px] text-theme-secondary bg-theme-secondary/80 px-2 py-1 rounded-md border border-theme pointer-events-none">
         Hover routes · scroll to zoom
       </div>
     </div>
@@ -319,7 +415,7 @@ function RouteMap({ alternatives, primaryWaypoints, primaryGeometryEncoded, orig
 
 function CurrentRouteCard({ currentRoute, isScored }) {
   if (!currentRoute) return null;
-  const etaHrs = ((currentRoute.eta ?? 0) / 3600).toFixed(1);
+  const etaHrs = formatEtaModal(currentRoute.eta ?? 0);
   const level  = currentRoute.risk_level ?? 'unknown';
 
   return (
@@ -327,37 +423,37 @@ function CurrentRouteCard({ currentRoute, isScored }) {
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 flex items-center justify-between gap-4"
+      className="rounded-xl border border-theme bg-theme-tertiary/60 p-4 flex items-center justify-between gap-4"
     >
       <div className="flex items-center gap-3 min-w-0">
-        <div className="w-8 h-8 rounded-lg bg-white/[0.05] border border-white/[0.08] flex items-center justify-center shrink-0">
-          <Route className="w-4 h-4 text-slate-400" />
+        <div className="w-8 h-8 rounded-lg bg-theme-tertiary/60 border border-theme flex items-center justify-center shrink-0">
+          <Route className="w-4 h-4 text-theme-secondary" />
         </div>
         <div className="min-w-0">
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Current Route</p>
-          <p className="text-xs text-white font-bold mt-0.5 truncate">Active path</p>
+          <p className="text-[10px] font-black uppercase tracking-widest text-theme-secondary">Current Route</p>
+          <p className="text-xs text-theme-primary font-bold mt-0.5 truncate">Active path</p>
         </div>
       </div>
 
       <div className="flex items-center gap-5 shrink-0">
         <div className="text-center">
-          <p className="text-[10px] text-slate-600 uppercase tracking-wide">ETA</p>
-          <p className="text-sm font-bold text-white tabular-nums">{etaHrs} hrs</p>
+          <p className="text-[10px] text-theme-secondary uppercase tracking-wide">ETA</p>
+          <p className="text-sm font-bold text-theme-primary tabular-nums">{etaHrs}</p>
         </div>
         <div className="text-center">
-          <p className="text-[10px] text-slate-600 uppercase tracking-wide">Distance</p>
-          <p className="text-sm font-bold text-white tabular-nums">{currentRoute.distance?.toFixed(0) ?? '—'} km</p>
+          <p className="text-[10px] text-theme-secondary uppercase tracking-wide">Distance</p>
+          <p className="text-sm font-bold text-theme-primary tabular-nums">{currentRoute.distance?.toFixed(0) ?? '—'} km</p>
         </div>
         <div className="text-center">
-          <p className="text-[10px] text-slate-600 uppercase tracking-wide">Risk</p>
+          <p className="text-[10px] text-theme-secondary uppercase tracking-wide">Risk</p>
           <p className={cn('text-sm font-black tabular-nums', riskColor(level))}>
             {isScored
               ? `${currentRoute.risk_score?.toFixed(0) ?? '—'}/100`
               : level.toUpperCase()}
           </p>
         </div>
-        <div className="h-6 w-px bg-white/[0.07]" />
-        <div className="flex items-center gap-1.5 text-[10px] text-slate-600">
+        <div className="h-6 w-px bg-theme-tertiary/60" />
+        <div className="flex items-center gap-1.5 text-[10px] text-theme-secondary">
           <div className="w-3 h-[2px] rounded bg-slate-500" style={{ backgroundImage: 'repeating-linear-gradient(90deg,#94a3b8 0,#94a3b8 4px,transparent 4px,transparent 9px)' }} />
           map
         </div>
@@ -371,7 +467,7 @@ function CurrentRouteCard({ currentRoute, isScored }) {
 function StatRow({ icon: Icon, label, children }) {
   return (
     <div className="flex items-center justify-between text-xs">
-      <span className="text-slate-500 flex items-center gap-1.5">
+      <span className="text-theme-secondary flex items-center gap-1.5">
         <Icon className="w-3 h-3 opacity-60" /> {label}
       </span>
       {children}
@@ -382,7 +478,7 @@ function StatRow({ icon: Icon, label, children }) {
 function RouteCard({ alt, isScoring, index, onHover, onApply, isApplying }) {
   const meta   = ROUTE_META[alt.label] ?? ROUTE_META.Avoidance;
   const Icon   = meta.icon;
-  const etaHrs = ((alt.eta ?? alt.duration_seconds ?? 0) / 3600).toFixed(1);
+  const etaHrs = formatEtaModal(alt.eta ?? alt.duration_seconds ?? 0);
   const hasRisk = alt.risk_assessed;
   const isRec  = alt.label === 'Recommended';
 
@@ -394,9 +490,9 @@ function RouteCard({ alt, isScoring, index, onHover, onApply, isApplying }) {
       onMouseEnter={() => onHover?.(alt.route_id)}
       onMouseLeave={() => onHover?.(null)}
       className={cn(
-        'relative rounded-2xl border flex flex-col overflow-hidden cursor-default',
-        meta.border, meta.bg,
-        isRec && 'ring-1 ring-indigo-500/35 shadow-lg shadow-indigo-900/30'
+        'relative rounded-2xl border flex flex-col overflow-hidden cursor-default transition-shadow',
+        meta.bg,
+        isRec ? 'border-indigo-500/50 shadow-lg shadow-indigo-500/20' : 'border-theme'
       )}
     >
       {/* Top bar */}
@@ -437,9 +533,9 @@ function RouteCard({ alt, isScoring, index, onHover, onApply, isApplying }) {
             <p className={cn('text-[11px] font-black uppercase tracking-[0.12em]', meta.color)}>
               {alt.label}
             </p>
-            <p className="text-slate-600 text-[10px] font-mono">Route {alt.route_id}</p>
+            <p className="text-theme-secondary text-[10px] font-mono">Route {alt.route_id}</p>
             {alt.label_reason && (
-              <p className="text-slate-600 text-[10px] leading-tight mt-0.5">{alt.label_reason}</p>
+              <p className="text-theme-secondary text-[10px] leading-tight mt-0.5">{alt.label_reason}</p>
             )}
           </div>
         </div>
@@ -447,10 +543,10 @@ function RouteCard({ alt, isScoring, index, onHover, onApply, isApplying }) {
         {/* Stats */}
         <div className="space-y-2">
           <StatRow icon={Clock} label="ETA">
-            <span className="text-white font-bold tabular-nums">{etaHrs} hrs</span>
+            <span className="text-theme-primary font-bold tabular-nums">{etaHrs}</span>
           </StatRow>
           <StatRow icon={Route} label="Distance">
-            <span className="text-white font-bold tabular-nums">
+            <span className="text-theme-primary font-bold tabular-nums">
               {alt.distance?.toFixed(0) ?? '—'} km
             </span>
           </StatRow>
@@ -463,9 +559,9 @@ function RouteCard({ alt, isScoring, index, onHover, onApply, isApplying }) {
         </div>
 
         {/* Risk */}
-        <div className="border-t border-white/[0.06] pt-3 space-y-2">
+        <div className="border-t border-theme pt-3 space-y-2">
           <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest">
-            <span className="text-slate-500 flex items-center gap-1">
+            <span className="text-theme-secondary flex items-center gap-1">
               <ShieldAlert className="w-3 h-3" /> Risk
             </span>
             <AnimatePresence mode="wait">
@@ -484,17 +580,17 @@ function RouteCard({ alt, isScoring, index, onHover, onApply, isApplying }) {
                   {alt.risk_score?.toFixed(0)}/100 · {alt.risk_level?.toUpperCase()}
                 </motion.span>
               ) : (
-                <motion.span key="pending" className="text-slate-600 italic text-[9px] font-normal normal-case">
+                <motion.span key="pending" className="text-theme-secondary italic text-[9px] font-normal normal-case">
                   Not assessed
                 </motion.span>
               )}
             </AnimatePresence>
           </div>
 
-          <div className="h-[3px] w-full bg-white/[0.05] rounded-full overflow-hidden">
+          <div className="h-[3px] w-full bg-theme-tertiary/60 rounded-full overflow-hidden">
             <motion.div
               className="h-full rounded-full"
-              style={{ backgroundColor: hasRisk ? riskBarColor(alt.risk_level) : '#1e293b' }}
+              style={{ backgroundColor: hasRisk ? riskBarColor(alt.risk_level) : 'transparent' }}
               initial={{ width: 0 }}
               animate={{ width: hasRisk ? `${Math.max(4, alt.risk_score ?? 0)}%` : '0%' }}
               transition={{ duration: 0.75, ease: [0.22, 1, 0.36, 1], delay: 0.15 }}
@@ -508,7 +604,7 @@ function RouteCard({ alt, isScoring, index, onHover, onApply, isApplying }) {
                 animate={{ opacity: 1, height: 'auto' }}
                 exit={{ opacity: 0, height: 0 }}
                 transition={{ duration: 0.25 }}
-                className="text-slate-500 text-[10px] italic leading-relaxed overflow-hidden"
+                className="text-theme-secondary text-[10px] italic leading-relaxed overflow-hidden"
               >
                 <CloudRain className="w-2.5 h-2.5 inline mr-1 opacity-50" />
                 {alt.reason}
@@ -534,7 +630,8 @@ function RouteCard({ alt, isScoring, index, onHover, onApply, isApplying }) {
 // ── Main modal ────────────────────────────────────────────────────────────────
 
 const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
-  const { data, isLoading, error } = useRerouting(shipmentId);
+  const { theme } = useTheme();
+  const { data, isLoading, error, refetch, isFetching } = useRerouting(shipmentId);
   const scoreMutation = useScoreReroute();
   const applyMutation = useApplyReroute();
   const [scoredAlts, setScoredAlts] = useState(null);
@@ -602,7 +699,7 @@ const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="absolute inset-0 bg-black/72 backdrop-blur-lg"
+            className="absolute inset-0 bg-theme-primary/70 backdrop-blur-lg"
             onClick={onClose}
           />
 
@@ -612,25 +709,25 @@ const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 16 }}
             transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-            className="relative bg-[#0d1117] rounded-2xl w-full max-w-4xl overflow-hidden shadow-2xl border border-white/[0.07] flex flex-col max-h-[92vh]"
+            className="relative bg-theme-secondary rounded-2xl w-full max-w-4xl overflow-hidden shadow-2xl border border-theme flex flex-col max-h-[92vh]"
             onClick={e => e.stopPropagation()}
           >
             {/* Top shimmer line */}
             <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-indigo-500/50 to-transparent" />
 
             {/* Header */}
-            <div className="px-6 py-4 border-b border-white/[0.06] flex items-center justify-between shrink-0">
+            <div className="px-6 py-4 border-b border-theme flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3.5">
                 <div className="p-2 bg-indigo-500/15 rounded-xl border border-indigo-500/25">
                   <ActivitySquare className="w-5 h-5 text-indigo-400" />
                 </div>
                 <div>
-                  <h2 className="text-sm font-extrabold text-white tracking-tight">
+                  <h2 className="text-sm font-extrabold text-theme-primary tracking-tight">
                     Reroute Intelligence
                   </h2>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
+                  <p className="text-[11px] text-theme-secondary mt-0.5">
                     Shipment&nbsp;
-                    <span className="font-mono text-slate-300">{shipmentId?.slice(-8)}</span>
+                    <span className="font-mono text-theme-secondary">{shipmentId?.slice(-8)}</span>
                     {isScored && (
                       <motion.span
                         initial={{ opacity: 0, x: -4 }}
@@ -643,12 +740,22 @@ const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
                   </p>
                 </div>
               </div>
-              <button
-                onClick={onClose}
-                className="p-1.5 text-slate-600 hover:text-white rounded-lg hover:bg-white/[0.06] transition-colors cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { setScoredAlts(null); refetch(); }}
+                  disabled={isFetching || isScoring}
+                  className="p-1.5 text-theme-secondary hover:text-theme-primary rounded-lg hover:bg-theme-tertiary transition-colors cursor-pointer disabled:opacity-50"
+                  title="Recalculate Routes"
+                >
+                  <RefreshCw className={cn("w-4 h-4", isFetching && "animate-spin")} />
+                </button>
+                <button
+                  onClick={onClose}
+                  className="p-1.5 text-theme-secondary hover:text-theme-primary rounded-lg hover:bg-theme-tertiary transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Body */}
@@ -656,18 +763,18 @@ const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
               {isLoading ? (
                 <div className="py-32 flex flex-col items-center gap-5">
                   <LoadingSpinner size="lg" label="Computing alternative corridors…" />
-                  <p className="text-slate-600 text-[10px] tracking-widest uppercase font-bold animate-pulse">
+                  <p className="text-theme-secondary text-[10px] tracking-widest uppercase font-bold animate-pulse">
                     Mappls routing · traffic analysis
                   </p>
                 </div>
               ) : error ? (
                 <div className="py-24 text-center space-y-3">
                   <ShieldAlert className="w-10 h-10 text-red-400 mx-auto opacity-40" />
-                  <p className="text-white font-bold">Failed to load routes</p>
-                  <p className="text-slate-500 text-sm">{error.message}</p>
+                  <p className="text-theme-primary font-bold">Failed to load routes</p>
+                  <p className="text-theme-secondary text-sm">{error.message}</p>
                   <button
                     onClick={onClose}
-                    className="mt-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-bold cursor-pointer transition-colors"
+                    className="mt-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-theme-primary rounded-xl text-sm font-bold cursor-pointer transition-colors"
                   >
                     Close
                   </button>
@@ -688,7 +795,7 @@ const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
                           <p className="text-red-400 font-black text-[10px] uppercase tracking-widest mb-1">
                             Reroute Recommended
                           </p>
-                          <p className="text-slate-300 text-[13px] leading-snug">{data.reason}</p>
+                          <p className="text-theme-secondary text-[13px] leading-snug">{data.reason}</p>
                         </div>
                       </motion.div>
                     )}
@@ -700,7 +807,7 @@ const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.08 }}
                   >
-                    <p className="text-[10px] text-slate-600 font-bold uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                    <p className="text-[10px] text-theme-secondary font-bold uppercase tracking-widest mb-2 flex items-center gap-1.5">
                       <MapPin className="w-3 h-3" /> Live corridor comparison
                     </p>
                     <RouteMap
@@ -712,6 +819,7 @@ const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
                       currentRoute={data?.current_route}
                       hoveredId={hoveredAlt}
                       incidents={routeIncidents}
+                      theme={theme}
                     />
                   </motion.div>
 
@@ -720,9 +828,9 @@ const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
 
                   {/* Divider */}
                   <div className="flex items-center gap-3">
-                    <div className="flex-1 h-px bg-white/[0.05]" />
-                    <span className="text-[9px] text-slate-600 font-bold uppercase tracking-widest">Alternatives</span>
-                    <div className="flex-1 h-px bg-white/[0.05]" />
+                    <div className="flex-1 h-px bg-theme-tertiary/60" />
+                    <span className="text-[9px] text-theme-secondary font-bold uppercase tracking-widest">Alternatives</span>
+                    <div className="flex-1 h-px bg-theme-tertiary/60" />
                   </div>
 
                   {/* Route cards — dynamic grid based on count */}
@@ -746,7 +854,7 @@ const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
                   </div>
 
                   {/* Assess Risk CTA */}
-                  <div className="border-t border-white/[0.05] pt-4">
+                  <div className="border-t border-theme pt-4">
                     <AnimatePresence mode="wait">
                       {isScored ? (
                         <motion.div
@@ -771,7 +879,7 @@ const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
                             'w-full flex items-center justify-center gap-2.5 py-3.5 rounded-xl font-bold text-sm transition-all cursor-pointer',
                             isScoring
                               ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/25 cursor-not-allowed'
-                              : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-950/60'
+                              : 'bg-indigo-600 hover:bg-indigo-500 text-theme-primary shadow-lg shadow-indigo-950/60'
                           )}
                         >
                           {isScoring ? (
@@ -789,7 +897,7 @@ const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
                       )}
                     </AnimatePresence>
                     {!isScored && !isScoring && (
-                      <p className="text-center text-slate-700 text-[11px] mt-2">
+                      <p className="text-center text-theme-secondary text-[11px] mt-2">
                         Routes use traffic data only · click above to add live weather scoring
                       </p>
                     )}

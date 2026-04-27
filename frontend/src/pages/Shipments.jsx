@@ -44,7 +44,7 @@ const calculateProgress = (shipment) => {
   const now = Date.now();
   const elapsed = (now - created) / 1000;
   
-  const simulatedElapsed = elapsed * 50; 
+  const simulatedElapsed = elapsed * 5; 
   const progress = Math.min((simulatedElapsed / shipment.expected_travel_seconds) * 100, 100);
   return progress;
 };
@@ -260,7 +260,7 @@ const Shipments = memo(function Shipments() {
                 <th className="py-4 px-6 font-semibold">Tracking ID</th>
                 <th className="py-4 px-6 font-semibold">Route</th>
                 <th className="py-4 px-6 font-semibold">Status</th>
-                <th className="py-4 px-6 font-semibold">Environment</th>
+                <th className="py-4 px-6 font-semibold text-center">ETA</th>
                 <th className="py-4 px-6 font-semibold text-center">Risk Intel</th>
                 <th className="py-4 px-6 font-semibold text-right">Actions</th>
               </tr>
@@ -345,11 +345,39 @@ const Shipments = memo(function Shipments() {
                         </span>
                       </td>
 
-                      <td className="py-4 px-6">
-                        <div className="text-xs text-theme-secondary flex flex-col gap-0.5">
-                          {shipment.conditions?.weather && <span>{shipment.conditions.weather}</span>}
-                          {shipment.conditions?.traffic && <span className="opacity-60">{shipment.conditions.traffic}</span>}
-                        </div>
+                      <td className="py-4 px-6 text-center">
+                        {(() => {
+                          const progress = calculateProgress(shipment);
+                          const r = 22;
+                          const circ = 2 * Math.PI * r;
+                          const offset = circ * (1 - progress / 100);
+                          const hours = shipment.eta_hours || 0;
+                          const d = Math.floor(hours / 24);
+                          const h = Math.round(hours % 24);
+                          return (
+                            <div className="flex items-center justify-center">
+                              <div className="relative w-14 h-14 flex items-center justify-center">
+                                <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 56 56">
+                                  <circle cx="28" cy="28" r={r} fill="none" strokeWidth="3" stroke="var(--border-color)" />
+                                  <circle cx="28" cy="28" r={r} fill="none" strokeWidth="3" strokeLinecap="round"
+                                    strokeDasharray={circ} strokeDashoffset={offset}
+                                    stroke="var(--accent)" style={{ transition: 'stroke-dashoffset 1s ease' }}
+                                  />
+                                </svg>
+                                <div className="flex flex-col items-center leading-none z-10">
+                                  {d > 0 ? (
+                                    <>
+                                      <span className="text-[11px] font-bold text-theme-primary">{d}d</span>
+                                      <span className="text-[10px] font-semibold text-theme-secondary">{h}h</span>
+                                    </>
+                                  ) : (
+                                    <span className="text-[12px] font-bold text-theme-primary">{h}h</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </td>
 
                       <td className="py-4 px-6 text-center">

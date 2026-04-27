@@ -45,13 +45,20 @@ def _advance_location(shipment: dict) -> dict | None:
     if not waypoints or not eta_seconds or not created_at:
         return None
 
+    if shipment.get("status") == "planned":
+        return waypoints[0]
+    if shipment.get("status") == "delivered":
+        return waypoints[-1]
+
     if isinstance(created_at, str):
         created_at = datetime.fromisoformat(created_at)
     if created_at.tzinfo is None:
         created_at = created_at.replace(tzinfo=timezone.utc)
 
     elapsed  = (datetime.now(timezone.utc) - created_at).total_seconds()
-    progress = min(elapsed / eta_seconds, 1.0)
+    # 5x Hyper-Lapse Time Simulation multiplier to match frontend visuals!
+    sim_elapsed = elapsed * 5
+    progress = min(sim_elapsed / eta_seconds, 1.0)
 
     if progress >= 1.0:
         return waypoints[-1]  # arrived at destination

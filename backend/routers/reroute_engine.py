@@ -162,7 +162,7 @@ async def _fetch_avoidance_route(shipment: dict) -> dict | None:
         return None
 
     worst  = max(severe, key=lambda i: INCIDENT_PRIORITY.get(i.get("type", ""), 0))
-    origin = shipment.get("origin_coords") or shipment.get("current_location")
+    origin = shipment.get("current_location") or shipment.get("origin_coords")
     dest   = shipment.get("destination_coords")
 
     if not origin or not dest:
@@ -204,7 +204,8 @@ async def get_alternatives(shipment: dict) -> dict:
     Returns 3 alternative routes using traffic ratio only — no weather API calls.
     Completes in ~3-5 seconds. Risk scores are traffic-based estimates only.
     """
-    current_location = shipment.get("origin_coords") or shipment.get("current_location")
+    from core.scheduler import _advance_location
+    current_location = _advance_location(shipment) or shipment.get("current_location") or shipment.get("origin_coords")
     dest_coords      = shipment.get("destination_coords")
     current_risk     = shipment.get("last_risk_assessment") or {}
 
