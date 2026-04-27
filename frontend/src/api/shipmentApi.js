@@ -34,11 +34,43 @@ export const createShipment = async (payload) => {
 };
 
 /**
- * Fetches rerouting options for a specific shipment.
- * @param {string} shipmentId 
+ * Updates a shipment partially (status, current_location, auto_reroute_enabled).
+ * @param {string} id
+ * @param {Object} payload
+ */
+export const updateShipment = async (id, payload) => {
+  const { data } = await apiClient.patch(`/api/shipments/${id}`, payload);
+  return data;
+};
+
+/**
+ * Deletes a shipment by ID.
+ * @param {string} id
+ */
+export const deleteShipment = async (id) => {
+  await apiClient.delete(`/api/shipments/${id}`);
+};
+
+/**
+ * Fetches rerouting options (fast — traffic only, no weather).
+ * @param {string} shipmentId
  */
 export const fetchRerouteData = async (shipmentId) => {
   if (!shipmentId) return null;
-  const { data } = await apiClient.get(`/api/reroute/${shipmentId}`);
+  const { data } = await apiClient.get(`/api/reroute/${shipmentId}`, { timeout: 30000 });
+  return data;
+};
+
+/**
+ * On-demand full risk scoring (weather + traffic) for alternatives.
+ * @param {string} shipmentId
+ * @param {Array}  alternatives  — from the initial fetchRerouteData response
+ */
+export const scoreRerouteAlternatives = async (shipmentId, alternatives) => {
+  const { data } = await apiClient.post(
+    `/api/reroute/${shipmentId}/score`,
+    { alternatives },
+    { timeout: 60000 },
+  );
   return data;
 };

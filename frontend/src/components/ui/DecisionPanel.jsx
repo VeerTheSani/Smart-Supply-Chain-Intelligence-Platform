@@ -3,46 +3,32 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useForm } from 'react-hook-form';
 import { X, Route, ShieldAlert, CheckCircle, Navigation } from 'lucide-react';
 import { useShipmentStore } from '../../stores/shipmentStore';
+import { useUpdateShipment } from '../../hooks/useShipments';
 import toast from 'react-hot-toast';
 
 const DecisionPanel = memo(function DecisionPanel({ shipmentId, onClose }) {
   const { register, handleSubmit, formState: { isSubmitting } } = useForm();
   
   const shipments = useShipmentStore(state => state.shipments);
-  const updateShipment = useShipmentStore(state => state.updateShipment);
+  const updateMutation = useUpdateShipment();
   
   const shipment = shipments.find(s => s.id === shipmentId);
 
   const onSubmit = async (data) => {
-    // Simulate backend response payload delivery securely
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        
-        let destination_mapping = data.new_route;
-        if (data.new_route === 'default_suggestion') {
-             destination_mapping = 'Pune'; // Simulated path
-        }
-        
-        // Mutate Zustand Synchronously 
-        updateShipment(shipmentId, {
-          destination: destination_mapping,
-          status: 'in_transit',
-          risk: {
-            ...shipment.risk,
-            current: {
-              ...shipment.risk?.current,
-              risk_level: 'medium',
-              risk_score: 55,
-              reason: 'Re-routed around critical conditions via ' + data.priority + ' strategy.'
-            }
-          }
-        });
-        
-        toast.success(`Route successfully optimized`);
-        resolve();
-        onClose();
-      }, 1200); // Demo simulation pacing factor
-    });
+    try {
+      // Send the reroute decision to the backend via PATCH
+      await updateMutation.mutateAsync({
+        id: shipmentId,
+        payload: {
+          status: 'rerouting',
+        },
+      });
+
+      toast.success(`Route optimization initiated for ${shipment.tracking_number}`);
+      onClose();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to execute routing command.');
+    }
   };
 
   if (!shipmentId || !shipment) return null;
@@ -126,7 +112,7 @@ const DecisionPanel = memo(function DecisionPanel({ shipmentId, onClose }) {
                        className="w-full flex items-center justify-center gap-2 py-3.5 bg-accent hover:bg-accent/80 text-white font-bold rounded-xl shadow-lg shadow-accent/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
                     >
                        {isSubmitting ? (
-                          <>Engaging Mainframe...</>
+                          <>Executing Routing Command...</>
                        ) : (
                           <>
                             <CheckCircle className="w-5 h-5" /> Execute Routing Command
