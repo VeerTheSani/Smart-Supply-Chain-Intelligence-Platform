@@ -142,3 +142,22 @@ body {
 .leaflet-routing-container {
   display: none !important;
 }
+
+/* ============================================
+   SVG ANIMATED POLYLINE ROUTES
+   ============================================ */
+
+@keyframes dash-flow {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+
+.animated-route-line path {
+  stroke-dasharray: 12 12;
+  animation: dash-flow 6s linear infinite;
+}
+
+.animated-route-glow path {
+  filter: drop-shadow(0 0 6px currentColor);
+}

@@ -97,6 +97,23 @@ const getIncidentIcon = (type) => {
 
 const SEVERITY_LABELS = ["Unknown", "Minor", "Moderate", "Major", "Critical"];
 
+const getViaIcon = (type) => {
+  const isPickup = type === 'pickup';
+  const isDelivery = type === 'delivery';
+  const color = isPickup ? 'rgba(139, 92, 246, 0.75)' : isDelivery ? 'rgba(20, 184, 166, 0.75)' : 'rgba(100, 116, 139, 0.75)';
+  const iconEmoji = isPickup ? '📦' : isDelivery ? '📍' : '⚙️';
+  return new L.DivIcon({
+    className: "custom-via-marker",
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+    html: `<div style="
+      background:${color};width:30px;height:30px;border-radius:50%;
+      border:2px solid rgba(255, 255, 255, 0.6);display:flex;align-items:center;
+      justify-content:center;font-size:16px; backdrop-filter:blur(4px);
+      box-shadow:0 3px 8px rgba(0,0,0,0.3)">${iconEmoji}</div>`
+  });
+};
+
 const Dashboard = memo(function Dashboard() {
   const { theme } = useTheme();
   const [selectedId, setSelectedId] = useState(null);
@@ -229,9 +246,27 @@ const Dashboard = memo(function Dashboard() {
                     <RoadRoute
                       waypoints={shipment.route_waypoints}
                       geometryEncoded={shipment.route_geometry_encoded}
-                      color={isSelected ? "#3b82f6" : isHigh ? "#ef4444" : isMed ? "#f97316" : "#22c55e"}
+                      color={isSelected ? "#3b82f6" : isHigh ? "#ef4444" : isMed ? "#f97316" : "#10b981"}
                     />
                   )}
+
+                  {/* Intermediate Via Points */}
+                  {shipment.via_points?.map((vp, idx) => {
+                    if (!vp.coords?.lat || !vp.coords?.lng) return null;
+                    return (
+                      <Marker 
+                        key={`via-${shipment.id}-${idx}`}
+                        position={[vp.coords.lat, vp.coords.lng]}
+                        icon={getViaIcon(vp.type)}
+                      >
+                        <Tooltip direction="top" offset={[0,-10]} opacity={1}>
+                           <div className="text-[11px] font-bold tracking-wide capitalize">
+                             <span className="opacity-70">{vp.type}:</span> {vp.location_name}
+                           </div>
+                        </Tooltip>
+                      </Marker>
+                    );
+                  })}
 
                   {/* Shipment truck marker */}
                   <Marker

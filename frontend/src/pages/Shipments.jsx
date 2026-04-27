@@ -49,6 +49,14 @@ const calculateProgress = (shipment) => {
   return progress;
 };
 
+const formatEta = (hours) => {
+  if (!hours) return '0h ETA';
+  const d = Math.floor(hours / 24);
+  const h = Math.round(hours % 24);
+  if (d > 0) return `${d}d ${h}h ETA`;
+  return `${h}h ETA`;
+};
+
 const Shipments = memo(function Shipments() {
   const { isLoading, error } = useShipments();
   const shipments = useShipmentStore(state => state.shipments);
@@ -293,16 +301,27 @@ const Shipments = memo(function Shipments() {
 
                       <td className="py-4 px-6">
                         <div className="flex flex-col gap-1.5 w-full min-w-[200px]">
-                          <div className="flex items-center gap-2 text-sm justify-between">
-                            <span className="text-theme-secondary truncate">{shipment.origin}</span>
-                            <span className="text-theme-secondary font-bold opacity-50 shrink-0">→</span>
-                            <span className="text-theme-primary font-medium truncate text-right">{shipment.destination}</span>
+                          <div className="flex items-center flex-wrap gap-2 text-[12px] overflow-hidden">
+                            <span className="text-theme-secondary shrink-0">{shipment.origin_name || shipment.origin}</span>
+                            
+                            {shipment.via_points?.map((vp, idx) => (
+                              <div key={idx} className="flex items-center gap-1.5 shrink-0">
+                                <span className="text-theme-secondary font-bold opacity-30">→</span>
+                                <span className="flex items-center gap-1 text-theme-primary bg-theme-tertiary px-1.5 py-0.5 rounded-md border border-theme shadow-sm">
+                                  <span className="text-[10px]">{vp.type === 'pickup' ? '📦' : vp.type === 'delivery' ? '📍' : '⚙️'}</span>
+                                  <span className="truncate max-w-[100px] font-medium">{vp.location_name}</span>
+                                </span>
+                              </div>
+                            ))}
+
+                            <span className="text-theme-secondary font-bold opacity-30 shrink-0">→</span>
+                            <span className="text-theme-primary font-bold truncate shrink-0">{shipment.destination_name || shipment.destination}</span>
                           </div>
                           {(shipment.distance_km || shipment.eta_hours) ? (
                              <div className="text-[10px] uppercase font-bold tracking-widest text-theme-secondary flex items-center justify-between mt-1">
                                <span>{shipment.distance_km?.toFixed(0) || '0'} km</span>
                                <span>{calculateProgress(shipment).toFixed(0)}%</span>
-                               <span>{shipment.eta_hours?.toFixed(1) || '0'}h ETA</span>
+                               <span>{formatEta(shipment.eta_hours)}</span>
                              </div>
                           ) : null}
                           <div className="h-1.5 w-full bg-theme-tertiary rounded-full overflow-hidden mt-0.5">
