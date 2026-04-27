@@ -33,6 +33,8 @@ class ConnectionManager:
         Accept and register a new frontend connection.
         Returns False and closes if limits exceeded.
         """
+        await websocket.accept()
+
         # Check global limit
         if self.connection_count >= MAX_CONNECTIONS:
             logger.warning(
@@ -46,15 +48,18 @@ class ConnectionManager:
         client_ip = self._get_ip(websocket)
         if self._ip_counts[client_ip] >= MAX_PER_IP:
             logger.warning(
-                f"[WS] rejected | reason=per_ip_limit "
-                f"ip={client_ip} limit={MAX_PER_IP}"
+                f"[WS] per_ip_limit reached for {client_ip}. Dropping oldest connection to allow new one."
             )
-            await websocket.close(code=1013, reason="Too many connections from this IP")
-            return False
+            oldest_ws = next((ws for ws in self.active_connections if self._get_ip(ws) == client_ip), None)
+            if oldest_ws:
+                await self.safe_disconnect(oldest_ws, code=1008)
+            else:
+                await websocket.close(code=1008, reason="Too many connections from this IP")
+                return False
 
-        await websocket.accept()
         self.active_connections.append(websocket)
         self._ip_counts[client_ip] += 1
+        logger.info(f"[WS] active={self.connection_count}")
         logger.info(f"[WS] connected | ip={client_ip} total={self.connection_count}")
         return True
 
@@ -68,10 +73,10 @@ class ConnectionManager:
                 del self._ip_counts[client_ip]
         logger.info(f"[WS] disconnected | total={self.connection_count}")
 
-    async def safe_disconnect(self, websocket: WebSocket):
+    async def safe_disconnect(self, websocket: WebSocket, code: int = 1000):
         """Gracefully close + remove a connection. Swallows errors."""
         try:
-            await websocket.close()
+            await websocket.close(code=code)
         except Exception:
             pass  # Already closed — safe to ignore
         self.disconnect(websocket)

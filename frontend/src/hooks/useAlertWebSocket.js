@@ -2,8 +2,11 @@ import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAlertStore } from '../stores/alertStore';
 import { useCountdownStore } from '../stores/countdownStore';
-import { webSocketService } from '../services/websocket';
+import { BASE_URL } from '../config/api';
+import { getWebSocket } from '../services/websocketSingleton';
 import toast from 'react-hot-toast';
+
+const API_KEY = import.meta.env.VITE_API_KEY || 'sc-dev-key-2026';
 
 export const useAlertWebSocket = () => {
   const queryClient = useQueryClient();
@@ -16,30 +19,115 @@ export const useAlertWebSocket = () => {
     sweepStaleProcessing,
   } = useCountdownStore();
 
-  const wsConnected = useAlertStore(state => state.wsConnected);
+  const wsRef = useRef(null);
+  const reconnectTimeoutRef = useRef(null);
+  const reconnectAttemptsRef = useRef(0);
   const processedEvents = useRef(new Set());
+  
+  // Use a ref for callbacks to avoid re-triggering the effect when they change
+  const callbacksRef = useRef({
+    addAlert, setWsConnected, queryClient, startCountdown, syncFromServer, cancelCountdown, completeCountdown, sweepStaleProcessing
+  });
 
-  // Reconnect State Resync — force fresh data from backend on reconnect
+  // Optimize: Runs only when dependencies change, not on EVERY render
   useEffect(() => {
-    if (wsConnected) {
-      // Clear dedup cache on reconnect so we don't ignore new events
-      processedEvents.current.clear();
-      queryClient.refetchQueries({ queryKey: ['shipments'], type: 'active' });
-      queryClient.refetchQueries({ queryKey: ['notifications'], type: 'active' });
-    }
-  }, [wsConnected, queryClient]);
+    callbacksRef.current = {
+      addAlert, setWsConnected, queryClient, startCountdown, syncFromServer, cancelCountdown, completeCountdown, sweepStaleProcessing
+    };
+  }, [addAlert, setWsConnected, queryClient, startCountdown, syncFromServer, cancelCountdown, completeCountdown, sweepStaleProcessing]);
 
   // Processing timeout sweep — runs every 10s to catch stuck countdowns
   useEffect(() => {
     const sweepInterval = setInterval(() => {
-      sweepStaleProcessing();
+      callbacksRef.current.sweepStaleProcessing();
     }, 10_000);
     return () => clearInterval(sweepInterval);
-  }, [sweepStaleProcessing]);
+  }, []);
 
   useEffect(() => {
+    let isMounted = true;
+    const url = BASE_URL.replace(/^http/, 'ws') + `/ws/alerts?token=${API_KEY}`;
+
+    const connect = () => {
+      if (!isMounted) return;
+
+      // FIX 2: Guard against duplicate hook usage
+      if (window.__WS_CONNECTED__) {
+          console.warn("[WS] useAlertWebSocket hook already active. Preventing duplicate.");
+          return;
+      }
+      window.__WS_CONNECTED__ = true;
+      
+      // Prevent duplicate connects if already open or connecting
+      if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+        return; 
+      }
+
+      // FIX 1: Make WebSocket GLOBAL
+      const ws = getWebSocket(url);
+      wsRef.current = ws;
+      
+      // FIX 3: Debug logging
+      console.log("WS instance:", wsRef.current);
+
+      ws.onopen = () => {
+        if (!isMounted) {
+          ws.close();
+          return;
+        }
+        reconnectAttemptsRef.current = 0;
+        callbacksRef.current.setWsConnected(true);
+        
+        // Clear dedup cache on reconnect so we don't ignore new events
+        processedEvents.current.clear();
+        callbacksRef.current.queryClient.refetchQueries({ queryKey: ['shipments'], type: 'active' });
+        callbacksRef.current.queryClient.refetchQueries({ queryKey: ['notifications'], type: 'active' });
+        
+        console.log("[WS] Secure connection established");
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'ping' || data.type === 'pong') return;
+          handleMessage(data);
+        } catch (e) {
+          console.error("[WS] Parse error", e);
+        }
+      };
+
+      ws.onclose = (event) => {
+        callbacksRef.current.setWsConnected(false);
+        wsRef.current = null;
+        window.__WS_CONNECTED__ = false; // Release lock so reconnect can occur
+        
+        if (!isMounted) return;
+
+        // Code 1008 = Policy Violation, 1013 = Server overload/rejection. DO NOT reconnect.
+        if (event.code === 1008 || event.code === 1013 || event.code === 403) {
+          console.error(`[WS] Server rejected connection (code ${event.code}) — will not reconnect`);
+          return;
+        }
+
+        attemptReconnect();
+      };
+
+      ws.onerror = () => {
+        // onerror will be followed by onclose
+      };
+    };
+
+    const attemptReconnect = () => {
+      if (reconnectAttemptsRef.current < 5) {
+        reconnectAttemptsRef.current++;
+        const delay = Math.min(30000, Math.pow(2, reconnectAttemptsRef.current) * 1000);
+        console.log(`[WS] Reconnecting in ${delay}ms... (Attempt ${reconnectAttemptsRef.current})`);
+        reconnectTimeoutRef.current = setTimeout(connect, delay);
+      }
+    };
+
     const handleMessage = (data) => {
-      // Idempotency guard — works with or without backend event_id
+      const cb = callbacksRef.current;
       const eventKey = data.event_id || `${data.type}-${data.shipment_id}-${data.timestamp}`;
       if (processedEvents.current.has(eventKey)) return;
       processedEvents.current.add(eventKey);
@@ -47,32 +135,23 @@ export const useAlertWebSocket = () => {
         processedEvents.current.delete(processedEvents.current.values().next().value);
       }
 
-      // ── Existing: risk_alert ──────────────────────────────────────────
+      // ── risk_alert ──────────────────────────────────────────
       if (data.type === 'risk_alert') {
-        addAlert({ id: `${data.timestamp}-${data.shipment_id}`, ...data });
+        cb.addAlert({ id: `${data.timestamp}-${data.shipment_id}`, ...data });
 
-        // Additive Toast System
         if (data.level === 'high' || data.level === 'critical') {
           toast.error(
             `Risk Alert: ${data.message} (Shipment ${data.shipment_id.slice(-6)})`,
-            {
-              id: data.shipment_id, // prevents duplicate spam
-              duration: 5000,
-            }
+            { id: data.shipment_id, duration: 5000 }
           );
         } else if (data.level === 'medium') {
           toast(
             `Risk Warning: ${data.message} (Shipment ${data.shipment_id.slice(-6)})`,
-            {
-              id: data.shipment_id,
-              icon: '⚠️',
-              duration: 4000,
-            }
+            { id: data.shipment_id, icon: '⚠️', duration: 4000 }
           );
         }
 
-        // Optimistic update of React Query cache
-        queryClient.setQueryData(['shipments'], (oldData) => {
+        cb.queryClient.setQueryData(['shipments'], (oldData) => {
           if (!oldData) return oldData;
           return oldData.map(shipment => {
             if (shipment.id === data.shipment_id) {
@@ -94,17 +173,16 @@ export const useAlertWebSocket = () => {
             return shipment;
           });
         });
-
-        queryClient.invalidateQueries({ queryKey: ['notifications'] });
+        cb.queryClient.invalidateQueries({ queryKey: ['notifications'] });
       }
 
-      // ── New: position_update ──────────────────────────────────────────
+      // ── position_update ──────────────────────────────────────────
       if (data.type === 'position_update') {
         if (typeof data.lat !== 'number' || typeof data.lng !== 'number' ||
             !Number.isFinite(data.lat) || !Number.isFinite(data.lng)) {
           return;
         }
-        queryClient.setQueryData(['shipments'], (oldData) => {
+        cb.queryClient.setQueryData(['shipments'], (oldData) => {
           if (!oldData) return oldData;
           return oldData.map(shipment => {
             if (shipment.id === data.shipment_id) {
@@ -120,9 +198,9 @@ export const useAlertWebSocket = () => {
         });
       }
 
-      // ── New: countdown_started ────────────────────────────────────────
+      // ── countdown_started ────────────────────────────────────────
       if (data.type === 'countdown_started') {
-        startCountdown(
+        cb.startCountdown(
           data.shipment_id,
           data.shipment_name,
           data.seconds_remaining,
@@ -133,24 +211,24 @@ export const useAlertWebSocket = () => {
           { icon: '⏱️', duration: 4000, id: `cd-${data.shipment_id}` }
         );
 
-        queryClient.invalidateQueries({ queryKey: ['shipments'] });
-        queryClient.invalidateQueries({ queryKey: ['notifications'] });
+        cb.queryClient.invalidateQueries({ queryKey: ['shipments'] });
+        cb.queryClient.invalidateQueries({ queryKey: ['notifications'] });
       }
 
-      // ── New: countdown_update ─────────────────────────────────────────
+      // ── countdown_update ─────────────────────────────────────────
       if (data.type === 'countdown_update') {
-        syncFromServer(data.shipment_id, data.seconds_remaining, data.shipment_name);
+        cb.syncFromServer(data.shipment_id, data.seconds_remaining, data.shipment_name);
       }
 
-      // ── New: countdown_cancelled ──────────────────────────────────────
+      // ── countdown_cancelled ──────────────────────────────────────
       if (data.type === 'countdown_cancelled') {
-        cancelCountdown(data.shipment_id);
+        cb.cancelCountdown(data.shipment_id);
         toast(`Countdown cancelled`, { icon: '✅', duration: 3000, id: `cd-cancel-${data.shipment_id}` });
       }
 
-      // ── New: reroute_executed ─────────────────────────────────────────
+      // ── reroute_executed ─────────────────────────────────────────
       if (data.type === 'reroute_executed') {
-        completeCountdown(data.shipment_id);
+        cb.completeCountdown(data.shipment_id);
 
         if (data.success) {
           toast.success(
@@ -164,16 +242,23 @@ export const useAlertWebSocket = () => {
           );
         }
 
-        // Refresh shipment data and notifications
-        queryClient.invalidateQueries({ queryKey: ['shipments'] });
-        queryClient.invalidateQueries({ queryKey: ['notifications'] });
+        cb.queryClient.invalidateQueries({ queryKey: ['shipments'] });
+        cb.queryClient.invalidateQueries({ queryKey: ['notifications'] });
       }
     };
 
-    webSocketService.connect(handleMessage, setWsConnected);
+    connect();
 
     return () => {
-      webSocketService.disconnect();
+      isMounted = false;
+      window.__WS_CONNECTED__ = false; // Release the global lock
+
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      if (wsRef.current) {
+        wsRef.current.onclose = null; // Prevent auto-reconnect on manual close
+        wsRef.current.close();
+        wsRef.current = null;
+      }
     };
-  }, [addAlert, setWsConnected, queryClient, startCountdown, syncFromServer, cancelCountdown, completeCountdown, sweepStaleProcessing]);
+  }, []); // Empty dependency array ensures connection logic only runs once
 };

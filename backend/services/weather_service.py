@@ -6,6 +6,7 @@
 import httpx
 import logging
 from datetime import datetime, timezone, timedelta
+from services.cache import weather_cache
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,11 @@ async def _fetch_hourly(lat: float, lng: float) -> dict | None:
     Fetch 48-hour hourly forecast for a coordinate.
     Returns the full hourly dict from Open-Meteo.
     """
+    cache_key = f"weather_{round(lat, 2)}_{round(lng, 2)}"
+    cached = weather_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     params = {
         "latitude":      lat,
         "longitude":     lng,
@@ -42,7 +48,9 @@ async def _fetch_hourly(lat: float, lng: float) -> dict | None:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(OPEN_METEO_URL, params=params)
             resp.raise_for_status()
-            return resp.json().get("hourly", {})
+            data = resp.json().get("hourly", {})
+            weather_cache.set(cache_key, data)
+            return data
     except Exception as e:
         logger.warning(f"Open-Meteo failed for ({lat}, {lng}): {e}")
         return None

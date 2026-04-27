@@ -496,6 +496,7 @@ def start_scheduler():
         minutes=5,
         id="risk_recompute",
         max_instances=1,
+        coalesce=True,
         replace_existing=True,
     )
 

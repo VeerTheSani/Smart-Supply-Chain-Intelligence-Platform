@@ -33,6 +33,7 @@ async def alerts_endpoint(websocket: WebSocket):
     # ── WS Authentication ─────────────────────────────────────────────────────
     token = websocket.query_params.get("token")
     if not token or token != API_KEY:
+        await websocket.accept()
         logger.warning(
             f"[WS] auth_rejected | ip={websocket.client.host if websocket.client else 'unknown'} "
             f"reason={'missing_token' if not token else 'invalid_token'}"
@@ -46,15 +47,20 @@ async def alerts_endpoint(websocket: WebSocket):
         return  # Connection rejected due to limits
 
     try:
+        import asyncio
         while True:
-            # Keep connection alive
-            # Frontend can send "ping" to check connection
-            data = await websocket.receive_text()
-            if data == "ping":
-                await websocket.send_json({"type": "pong"})
+            try:
+                # Wait for data or timeout to send heartbeat
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                if data == "ping":
+                    await websocket.send_json({"type": "pong"})
+            except asyncio.TimeoutError:
+                # Send heartbeat to keep connection alive
+                await websocket.send_json({"type": "ping"})
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
         logger.info("Frontend disconnected from alerts")
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
+    finally:
+        # Ensure removal on disconnect
         manager.disconnect(websocket)
