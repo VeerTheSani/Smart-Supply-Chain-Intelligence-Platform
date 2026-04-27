@@ -17,7 +17,7 @@ async def ping_db():
     await client.admin.command("ping")
     return True
 
-# tesing only runs when "python thisfile name and run it"
+# Self test — only runs when executed directly
 if __name__ == "__main__":
     import asyncio
     async def test():

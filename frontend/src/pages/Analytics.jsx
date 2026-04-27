@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { BarChart3, Activity, ShieldAlert, Route, Zap } from 'lucide-react';
 import { useDashboard } from '../hooks/useDashboard';
@@ -45,6 +45,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 
 const Analytics = memo(function Analytics() {
   const { data, isLoading, error } = useDashboard();
+  const [viewMode, setViewMode] = useState('individual');
 
   if (isLoading) return <div className="py-20 flex justify-center"><LoadingSpinner /></div>;
   if (error) return <ErrorFallback error={error} />;
@@ -65,11 +66,17 @@ const Analytics = memo(function Analytics() {
     color: STATUS_COLORS[key] || COLORS.unknown
   }));
 
-  // Prepare Risk Trend Data (averaging risk across time using shipment history)
+  // Prepare Risk Trend Data (Both individual and average)
   let trendDataMap = {};
+  const activeShipmentKeys = new Set();
+  
   if (data?.shipments) {
-    data.shipments.forEach(shipment => {
-      if (shipment.risk?.history) {
+    data.shipments.forEach((shipment, index) => {
+      const sKey = shipment.tracking_number || `SHP-${index}`;
+      
+      if (shipment.risk?.history && shipment.risk.history.length > 0) {
+        activeShipmentKeys.add(sKey);
+        
         shipment.risk.history.forEach((hist) => {
            if (!hist.timestamp) return;
            const date = new Date(hist.timestamp);
@@ -78,19 +85,23 @@ const Analytics = memo(function Analytics() {
            if (!trendDataMap[timeKey]) {
              trendDataMap[timeKey] = { time: timeKey, totalRisk: 0, count: 0 };
            }
+           trendDataMap[timeKey][sKey] = Number(hist.risk_score.toFixed(1));
            trendDataMap[timeKey].totalRisk += hist.risk_score;
            trendDataMap[timeKey].count += 1;
         });
       }
     });
   }
+  
   const riskTrendData = Object.values(trendDataMap)
     .sort((a,b) => a.time.localeCompare(b.time))
     .map(d => ({
-      time: d.time,
-      avgRisk: Number((d.totalRisk / d.count).toFixed(1))
+       ...d,
+       avgRisk: d.count > 0 ? Number((d.totalRisk / d.count).toFixed(1)) : 0
     }))
-    .slice(-10); // Show last 10 points
+    .slice(-15); // Show last 15 points
+    
+  const shipmentKeysArray = Array.from(activeShipmentKeys);
 
   return (
     <div className="space-y-6">
@@ -141,29 +152,90 @@ const Analytics = memo(function Analytics() {
            animate={{ opacity: 1, scale: 1 }}
            className="lg:col-span-2 bg-theme-secondary border border-theme rounded-2xl p-6 shadow-sm flex flex-col"
         >
-          <div className="mb-6">
-            <h3 className="text-sm font-black uppercase tracking-widest text-theme-primary flex items-center gap-2">
-              <Activity className="w-4 h-4 text-accent" />
-              Network Risk Coefficient Trend
-            </h3>
-            <p className="text-xs text-theme-secondary mt-1">Aggregated mean risk score across all tracked entities.</p>
+          <div className="mb-6 flex justify-between items-start">
+            <div>
+              <h3 className="text-sm font-black uppercase tracking-widest text-theme-primary flex items-center gap-2">
+                <Activity className="w-4 h-4 text-accent" />
+                Network Risk Coefficient Trend
+              </h3>
+              <p className="text-xs text-theme-secondary mt-1">
+                 {viewMode === 'individual' ? 'Comparative risk tracking across all active missions.' : 'Aggregated mean risk score across all tracked entities.'}
+              </p>
+            </div>
+            
+            {/* View Mode Toggle */}
+            <div className="flex items-center gap-1 bg-theme-primary/50 backdrop-blur-md p-1 pl-3 border border-theme rounded-full">
+               <span className="text-[9px] font-black uppercase text-theme-secondary mr-1 tracking-widest">VIEW:</span>
+               <button 
+                  onClick={() => setViewMode('individual')}
+                  className={`px-3 py-1 rounded-full text-[11px] font-bold transition-all ${viewMode === 'individual' ? 'bg-accent text-white shadow-md' : 'text-theme-secondary hover:text-theme-primary'}`}
+               >
+                  Individual
+               </button>
+               <button 
+                  onClick={() => setViewMode('average')}
+                  className={`px-3 py-1 rounded-full text-[11px] font-bold transition-all ${viewMode === 'average' ? 'bg-blue-500 text-white shadow-md' : 'text-theme-secondary hover:text-theme-primary'}`}
+               >
+                  Network Average
+               </button>
+            </div>
           </div>
           
-          <div className="flex-1 min-h-[300px]">
+           <div className="flex-1 min-h-[300px]">
              {riskTrendData.length > 0 ? (
                <ResponsiveContainer width="100%" height="100%">
                  <AreaChart data={riskTrendData}>
                    <defs>
-                     <linearGradient id="colorRisk" x1="0" y1="0" x2="0" y2="1">
-                       <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3}/>
-                       <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0}/>
+                     <linearGradient id="colorRiskAvg" x1="0" y1="0" x2="0" y2="1">
+                       <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
+                       <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
                      </linearGradient>
+                     {viewMode === 'individual' && shipmentKeysArray.map((key, index) => {
+                       const color = `hsl(${(index * 137.5) % 360}, 75%, 55%)`;
+                       return (
+                         <linearGradient key={`gradient-${key}`} id={`colorRisk-${index}`} x1="0" y1="0" x2="0" y2="1">
+                           <stop offset="5%" stopColor={color} stopOpacity={0.25}/>
+                           <stop offset="95%" stopColor={color} stopOpacity={0}/>
+                         </linearGradient>
+                       );
+                     })}
                    </defs>
                    <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-theme-tertiary opacity-20" vertical={false} />
                    <XAxis dataKey="time" stroke="currentColor" className="text-theme-secondary text-xs" tickLine={false} axisLine={false} />
                    <YAxis stroke="currentColor" className="text-theme-secondary text-xs" tickLine={false} axisLine={false} domain={[0, 100]} />
                    <Tooltip content={<CustomTooltip />} />
-                   <Area type="monotone" dataKey="avgRisk" name="Avg Risk Score" stroke="#8b5cf6" strokeWidth={3} fillOpacity={1} fill="url(#colorRisk)" activeDot={{ r: 6, strokeWidth: 0 }} />
+                   <Legend wrapperStyle={{ fontSize: '10px' }} iconType="circle" />
+                   
+                   {viewMode === 'individual' ? (
+                     shipmentKeysArray.map((key, index) => {
+                       const color = `hsl(${(index * 137.5) % 360}, 75%, 55%)`;
+                       return (
+                         <Area 
+                           key={key}
+                           type="monotone" 
+                           dataKey={key} 
+                           name={`Shipment ${key}`} 
+                           stroke={color} 
+                           strokeWidth={2.5} 
+                           fillOpacity={1} 
+                           fill={`url(#colorRisk-${index})`} 
+                           activeDot={{ r: 5, strokeWidth: 0 }} 
+                           connectNulls={true}
+                         />
+                       );
+                     })
+                   ) : (
+                     <Area 
+                       type="monotone" 
+                       dataKey="avgRisk" 
+                       name="Network Average" 
+                       stroke="#3b82f6" 
+                       strokeWidth={3} 
+                       fillOpacity={1} 
+                       fill="url(#colorRiskAvg)" 
+                       activeDot={{ r: 6, strokeWidth: 0 }} 
+                     />
+                   )}
                  </AreaChart>
                </ResponsiveContainer>
              ) : (

@@ -16,6 +16,7 @@ from bson import ObjectId
 
 from database import db
 from core.websocket_manager import manager
+from core.event_factory import create_risk_alert
 
 logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
@@ -245,27 +246,20 @@ async def _process_shipment(shipment: dict):
 
     # STEP 9 — Broadcast alert if risk changed OR auto rerouted
     if risk_changed or auto_rerouted:
-        # Build message — type must be "risk_alert" and level must be lowercase
-        # so Nandani's frontend WebSocket handler recognises it correctly
-        if auto_rerouted and reroute_data:
-            alert_message = f"Auto-rerouted due to {new_level} risk — {reason}"
-        else:
-            alert_message = reason
+        # Build message using strict event factory
+        alert_message = f"Auto-rerouted due to {new_level} risk — {reason}" if (auto_rerouted and reroute_data) else reason
 
-        alert = {
-            # Frontend listens for exactly "risk_alert"
-            "type":           "risk_alert",
-            "shipment_id":    shipment_id,
-            "shipment_name":  shipment_name,
-            # level must be lowercase ("high" not "HIGH")
-            "level":          new_level.lower(),
-            "message":        alert_message,
-            "previous_level": prev_level.lower() if prev_level else "unknown",
-            "score":          new_score,
-            "primary_driver": driver,
-            "auto_rerouted":  auto_rerouted,
-            "timestamp":      now.isoformat(),
-        }
+        alert = create_risk_alert(
+            shipment_id=shipment_id,
+            shipment_name=shipment_name,
+            level=new_level.lower(),
+            message=alert_message,
+            score=new_score,
+            primary_driver=driver,
+            source="REAL_SYSTEM",  # Scheduler is production
+            previous_level=prev_level,
+            auto_rerouted=auto_rerouted,
+        )
 
         await manager.broadcast(alert)
         logger.info(

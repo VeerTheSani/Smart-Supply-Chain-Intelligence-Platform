@@ -21,6 +21,7 @@ class ShipmentCreate(BaseModel):
     origin_name: str = Field(..., min_length=1, max_length=200)
     destination_name: str = Field(..., min_length=1, max_length=200)
     auto_reroute_enabled: bool = False
+    system_mode: Literal["REAL", "SIM"] = "REAL"  # REAL=production, SIM=scenario lab
     # deadline removed — ETA comes from Mappls routing
 
 
@@ -53,6 +54,7 @@ class ShipmentResponse(BaseModel):
 
     status: Literal["planned", "in_transit", "rerouting", "delivered", "delayed"]
     auto_reroute_enabled: bool
+    system_mode: Literal["REAL", "SIM"] = "REAL"  # Hard separation
 
     # Risk
     last_risk_assessment: Optional[RiskAssessment] = None
@@ -61,6 +63,37 @@ class ShipmentResponse(BaseModel):
 
     created_at: datetime
     updated_at: datetime
+
+
+class RiskSnapshot(BaseModel):
+    score: float
+    level: str
+    primary_driver: str
+    factors: List[dict]
+
+
+class CascadeImpact(BaseModel):
+    nodes_affected: int
+    total_delay_hours: float
+
+
+class DecisionCreate(BaseModel):
+    shipment_id: str
+    type: Literal["auto_reroute", "manual_reroute"]
+    status: Literal["pending", "executed", "cancelled"]
+    risk_snapshot: RiskSnapshot
+    cascade_impact: CascadeImpact
+    reason_summary: str
+    confidence_score: float
+    proposed_route_id: str
+    countdown_expires_at: Optional[datetime] = None
+
+
+class DecisionResponse(DecisionCreate):
+    model_config = ConfigDict(populate_by_name=True)
+    id: str
+    created_at: datetime
+    executed_at: Optional[datetime] = None
 
 if __name__ == "__main__":
     sample = {

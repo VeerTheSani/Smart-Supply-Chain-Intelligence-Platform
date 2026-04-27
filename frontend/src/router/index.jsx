@@ -12,6 +12,7 @@ const Disruptions = lazy(() => import('../pages/Disruptions'));
 const Routes = lazy(() => import('../pages/Routes'));
 const Analytics = lazy(() => import('../pages/Analytics'));
 const Settings = lazy(() => import('../pages/Settings'));
+const ScenarioLab = lazy(() => import('../pages/ScenarioLab'));
 const NotFound = lazy(() => import('../pages/NotFound'));
 
 /**
@@ -28,6 +29,7 @@ export const router = createBrowserRouter([
       { path: 'disruptions', element: <Disruptions /> },
       { path: 'routes', element: <Routes /> },
       { path: 'analytics', element: <Analytics /> },
+      { path: 'scenario-lab', element: <ScenarioLab /> },
       { path: 'settings', element: <Settings /> },
       { path: '*', element: <NotFound /> },
     ],

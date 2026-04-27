@@ -107,7 +107,7 @@ async def _initial_risk_assessment(shipment_id, doc: dict):
 
 # ── POST /api/shipments ────────────────────────────────────────────────────────
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 async def create_shipment(data: ShipmentCreate):
     """
     Create a new shipment:
@@ -116,6 +116,12 @@ async def create_shipment(data: ShipmentCreate):
     3. Reverse geocode waypoints → city names (for Gemini)
     4. Store in MongoDB
     """
+    # Input sanitization — reject suspicious characters beyond Pydantic length checks
+    from main import validate_string
+    validate_string(data.shipment_name, "shipment_name")
+    validate_string(data.origin_name, "origin_name")
+    validate_string(data.destination_name, "destination_name")
+
     try:
         origin_geo = await geocode(data.origin_name)
         dest_geo   = await geocode(data.destination_name)
@@ -213,7 +219,7 @@ async def create_shipment(data: ShipmentCreate):
 
 # ── GET /api/shipments ─────────────────────────────────────────────────────────
 
-@router.get("/")
+@router.get("")
 async def list_shipments(status: Optional[str] = Query(None)):
     query = {}
     if status:
