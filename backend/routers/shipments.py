@@ -121,6 +121,10 @@ async def create_shipment(data: ShipmentCreate):
     try:
         origin_geo = await geocode(data.origin_name)
         dest_geo   = await geocode(data.destination_name)
+        via_geos   = []
+        if data.via_points:
+            import asyncio
+            via_geos = await asyncio.gather(*(geocode(vp.location_name) for vp in data.via_points))
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except RuntimeError as e:
@@ -128,6 +132,7 @@ async def create_shipment(data: ShipmentCreate):
 
     origin_coords = {"lat": origin_geo["lat"], "lng": origin_geo["lng"]}
     dest_coords   = {"lat": dest_geo["lat"],   "lng": dest_geo["lng"]}
+    via_coords_list = [{"lat": vgeo["lat"], "lng": vgeo["lng"]} for vgeo in via_geos]
 
     route_waypoints      = []
     road_names           = []
@@ -136,7 +141,7 @@ async def create_shipment(data: ShipmentCreate):
     eta_hours            = None
 
     try:
-        route = await get_route(origin_coords, dest_coords)
+        route = await get_route(origin_coords, dest_coords, via_coords_list=via_coords_list)
         route_waypoints = route["waypoints"]
         distance_km     = route["distance_km"]
         road_names      = route.get("road_names", [])
@@ -167,6 +172,14 @@ async def create_shipment(data: ShipmentCreate):
         "destination_name":      data.destination_name,
         "destination_resolved":  dest_geo["display_name"],
         "destination_coords":    dest_coords,
+        "via_points": [
+            {
+                "location_name": vp.location_name,
+                "type": vp.type,
+                "coords": {"lat": vgeo["lat"], "lng": vgeo["lng"]}
+            }
+            for vp, vgeo in zip((data.via_points or []), via_geos)
+        ],
         "route_geometry_encoded": geometry_encoded, 
 
         # Frontend compatibility fields (her schema)

@@ -8,6 +8,12 @@ class Coordinates(BaseModel):
     lng: float = Field(..., ge=-180, le=180)
 
 
+class ViaPoint(BaseModel):
+    location_name: str = Field(..., min_length=1, max_length=200)
+    type: Literal["pickup", "delivery", "custom"]
+    coords: Optional[Coordinates] = None
+
+
 class RiskAssessment(BaseModel):
     final_score: float = Field(..., ge=0, le=100)
     risk_level: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
@@ -20,9 +26,9 @@ class ShipmentCreate(BaseModel):
     shipment_name: str = Field(..., min_length=1, max_length=200)
     origin_name: str = Field(..., min_length=1, max_length=200)
     destination_name: str = Field(..., min_length=1, max_length=200)
+    via_points: Optional[List[ViaPoint]] = []
     auto_reroute_enabled: bool = False
     system_mode: Literal["REAL", "SIM"] = "REAL"  # REAL=production, SIM=scenario lab
-    # deadline removed — ETA comes from Mappls routing
 
 
 class ShipmentUpdate(BaseModel):
@@ -42,6 +48,7 @@ class ShipmentResponse(BaseModel):
     destination_name: str
     destination_resolved: str
     destination_coords: Coordinates
+    via_points: List[ViaPoint] = []
     current_location: Optional[Coordinates] = None
 
     # Route data

@@ -1,8 +1,9 @@
-import { memo, useEffect } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useForm } from 'react-hook-form';
 import { X, Package, Plus } from 'lucide-react';
 import { useCreateShipment } from '../../hooks/useShipments';
+import LocationAutocomplete from './LocationAutocomplete';
 import toast from 'react-hot-toast';
 import { cn } from '../../lib/utils';
 
@@ -18,10 +19,28 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
 
   const createMutation = useCreateShipment();
   const autoReroute = watch('auto_reroute_enabled');
+  
+  const [viaPoints, setViaPoints] = useState([]);
 
   useEffect(() => {
-    if (!isOpen) reset();
+    register('origin_name', { required: 'Origin city is required' });
+    register('destination_name', { required: 'Destination city is required' });
+  }, [register]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      reset();
+      setViaPoints([]);
+    }
   }, [isOpen, reset]);
+
+  const addViaPoint = () => setViaPoints(prev => prev.length < 5 ? [...prev, { location_name: '', type: 'pickup' }] : prev);
+  const updateViaPoint = (index, field, value) => setViaPoints(prev => {
+     const next = [...prev];
+     next[index][field] = value;
+     return next;
+  });
+  const removeViaPoint = (index) => setViaPoints(prev => prev.filter((_, i) => i !== index));
 
   const onSubmit = async (data) => {
     try {
@@ -29,6 +48,7 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
         shipment_name: data.shipment_name,
         origin_name: data.origin_name,
         destination_name: data.destination_name,
+        via_points: viaPoints.filter(vp => vp.location_name.trim() !== ''),
         auto_reroute_enabled: data.auto_reroute_enabled,
       });
       toast.success('Shipment deployed. Will appear once risk analysis completes (~10s).');
@@ -96,33 +116,66 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
                   <label className="block text-sm font-bold text-theme-secondary mb-2 uppercase tracking-wide">
                     Origin City
                   </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Mumbai, Maharashtra"
-                    {...register('origin_name', { required: 'Origin city is required' })}
-                    className={cn(
-                      'w-full bg-theme-tertiary border text-theme-primary text-sm rounded-xl px-4 py-3 focus:ring-2 focus:ring-accent focus:outline-none transition-all',
-                      errors.origin_name ? 'border-danger' : 'border-theme'
-                    )}
+                  <LocationAutocomplete
+                    placeholder="Search origin city..."
+                    value={watch('origin_name')}
+                    onChange={(val) => setValue('origin_name', val, { shouldValidate: true })}
+                    error={errors.origin_name}
                   />
                   {errors.origin_name && (
                     <p className="text-danger text-xs mt-1.5">{errors.origin_name.message}</p>
                   )}
                 </div>
 
+                {/* Via Points */}
+                {viaPoints.map((vp, index) => (
+                  <div key={index} className="flex items-start gap-2 bg-theme-tertiary/20 p-3 rounded-xl border border-theme">
+                     <div className="flex-1">
+                        <LocationAutocomplete
+                           placeholder={`Via Stop ${index + 1}...`}
+                           value={vp.location_name}
+                           onChange={(val) => updateViaPoint(index, 'location_name', val)}
+                        />
+                     </div>
+                     <select 
+                        className="bg-theme-secondary border border-theme text-theme-primary text-sm rounded-xl px-3 py-3 focus:ring-2 focus:ring-accent outline-none"
+                        value={vp.type}
+                        onChange={(e) => updateViaPoint(index, 'type', e.target.value)}
+                     >
+                        <option value="pickup">Pick-up</option>
+                        <option value="delivery">Delivery</option>
+                        <option value="custom">Custom</option>
+                     </select>
+                     <button
+                        type="button"
+                        onClick={() => removeViaPoint(index)}
+                        className="bg-danger/10 text-danger hover:bg-danger/20 p-3 rounded-xl border border-danger/20 transition-colors"
+                     >
+                        <X className="w-5 h-5" />
+                     </button>
+                  </div>
+                ))}
+
+                {viaPoints.length < 5 && (
+                  <button 
+                     type="button" 
+                     onClick={addViaPoint}
+                     className="text-xs font-bold text-accent tracking-wide hover:underline flex items-center gap-1"
+                  >
+                     <Plus className="w-3 h-3" /> ADD VIA TARGET
+                  </button>
+                )}
+
                 {/* Destination */}
                 <div>
                   <label className="block text-sm font-bold text-theme-secondary mb-2 uppercase tracking-wide">
                     Destination City
                   </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Delhi, NCT"
-                    {...register('destination_name', { required: 'Destination city is required' })}
-                    className={cn(
-                      'w-full bg-theme-tertiary border text-theme-primary text-sm rounded-xl px-4 py-3 focus:ring-2 focus:ring-accent focus:outline-none transition-all',
-                      errors.destination_name ? 'border-danger' : 'border-theme'
-                    )}
+                  <LocationAutocomplete
+                    placeholder="Search destination city..."
+                    value={watch('destination_name')}
+                    onChange={(val) => setValue('destination_name', val, { shouldValidate: true })}
+                    error={errors.destination_name}
                   />
                   {errors.destination_name && (
                     <p className="text-danger text-xs mt-1.5">{errors.destination_name.message}</p>
