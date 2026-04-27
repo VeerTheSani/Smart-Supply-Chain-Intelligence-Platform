@@ -1,17 +1,18 @@
-import { memo } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Activity, AlertTriangle, ShieldCheck, TrendingUp, Navigation, Package } from 'lucide-react';
 import { useDashboard } from '../hooks/useDashboard';
 import { useShipments } from '../hooks/useShipments';
-import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline, Tooltip } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap, Tooltip } from 'react-leaflet';
 import { useShipmentStore } from '../stores/shipmentStore';
 import { useTheme } from '../context/ThemeContext';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import icon from 'leaflet/dist/images/marker-icon.png';
 import iconShadow from 'leaflet/dist/images/marker-shadow.png';
-import { useEffect, useState } from "react";
-
+import RoadRoute from '../components/ui/RoadRoute';
+import LoadingSpinner from '../components/ui/LoadingSpinner';
+import ErrorFallback from '../components/ui/ErrorFallback';
 
 let DefaultIcon = L.icon({
   iconUrl: icon,
@@ -20,8 +21,6 @@ let DefaultIcon = L.icon({
   iconAnchor: [12, 41]
 });
 L.Marker.prototype.options.icon = DefaultIcon;
-import LoadingSpinner from '../components/ui/LoadingSpinner';
-import ErrorFallback from '../components/ui/ErrorFallback';
 
 const StatCard = memo(function StatCard({ title, value, icon: Icon, trend, colorClass, delay }) {
   return (
@@ -60,7 +59,7 @@ function FitBounds({ shipments }) {
       ?.filter(s => s.current_location?.lat && s.current_location?.lng)
       .map(s => [s.current_location.lat, s.current_location.lng]);
 
-    if (points.length > 0) {
+    if (points && points.length > 0) {
       const bounds = L.latLngBounds(points);
       map.fitBounds(bounds, {
         padding: [80, 80],
@@ -97,17 +96,71 @@ const getMarkerIcon = (risk, isSelected, theme) => {
   });
 };
 
+const getIncidentIcon = (type) => {
+  const color =
+    ["ROAD_CLOSED", "ACCIDENT"].includes(type) ? "#ef4444" :
+    ["JAM", "ROAD_WORKS"].includes(type) ? "#f97316" : "#facc15";
+  return new L.DivIcon({
+    className: "",
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+    html: `<div style="
+      background:${color};width:22px;height:22px;border-radius:50%;
+      border:2px solid white;display:flex;align-items:center;
+      justify-content:center;font-size:11px;
+      box-shadow:0 2px 6px rgba(0,0,0,0.4)">⚠️</div>`
+  });
+};
+
+const SEVERITY_LABELS = ["Unknown", "Minor", "Moderate", "Major", "Critical"];
+
 const Dashboard = memo(function Dashboard() {
   const { theme } = useTheme();
   const [selectedId, setSelectedId] = useState(null);
+  const [incidentOverride, setIncidentOverride] = useState({});
+  const [fetchingIncidents, setFetchingIncidents] = useState(0);
+
   const { data, isLoading, error } = useDashboard();
   const { isLoading: shipmentsLoading } = useShipments();
   const shipments = useShipmentStore(state => state.shipments);
+
   const highRiskCount = shipments.filter(
     s => s.risk?.current?.risk_level === 'high'
   ).length;
 
-  if (isLoading) return <div className="py-24 flex flex-col items-center justify-center gap-4"><LoadingSpinner /><p className="text-theme-secondary text-sm tracking-widest uppercase font-bold animate-pulse">Loading Live Intelligence...</p></div>;
+  // For every shipment with no stored incidents, fire a background fetch once.
+  useEffect(() => {
+    shipments.forEach(s => {
+      if ((s.route_incidents?.length ?? 0) > 0) return;
+      if (incidentOverride[s.id] !== undefined) return;
+
+      setIncidentOverride(prev => ({ ...prev, [s.id]: prev[s.id] ?? null }));
+      setFetchingIncidents(n => n + 1);
+
+      fetch(`/api/shipments/${s.id}/incidents`)
+        .then(r => r.json())
+        .then(json => {
+          if (json.incidents?.length > 0) {
+            setIncidentOverride(prev => ({ ...prev, [s.id]: json.incidents }));
+          }
+        })
+        .catch(() => {})
+        .finally(() => setFetchingIncidents(n => Math.max(0, n - 1)));
+    });
+  }, [shipments]);
+
+  const handleMarkerClick = (shipmentId) => {
+    setSelectedId(prev => prev === shipmentId ? null : shipmentId);
+  };
+
+  if (isLoading) return (
+    <div className="py-24 flex flex-col items-center justify-center gap-4">
+      <LoadingSpinner />
+      <p className="text-theme-secondary text-sm tracking-widest uppercase font-bold animate-pulse">
+        Loading Live Intelligence...
+      </p>
+    </div>
+  );
   if (error) return <ErrorFallback error={error} />;
 
   const isLowRisk = data?.avg_risk_score < 40;
@@ -173,12 +226,12 @@ const Dashboard = memo(function Dashboard() {
       >
         <div className="px-6 py-5 border-b border-theme/50 bg-theme-secondary/20 flex justify-between items-center z-10 relative">
           <h2 className="text-xl font-black text-theme-primary flex items-center gap-3 tracking-tight">
-            <Navigation className="w-6 h-6 text-accent animate-pulse" /> Global Fleet Intelligence
+            <Navigation className="w-6 h-6 text-accent animate-pulse" /> Live Shipment Tracking
           </h2>
           <div className="flex gap-4 text-[9px] uppercase font-black tracking-[0.2em] bg-theme-primary/80 px-4 py-2 rounded-xl border border-theme shadow-lg backdrop-blur-sm">
-            <span className="flex items-center gap-2 text-success"><div className="w-2 h-2 rounded-full bg-success shadow-[0_0_8px_rgba(34,197,94,0.5)]"></div> Nominal</span>
+            <span className="flex items-center gap-2 text-success"><div className="w-2 h-2 rounded-full bg-success shadow-[0_0_8px_rgba(34,197,94,0.5)]"></div> Safe</span>
             <span className="flex items-center gap-2 text-warning"><div className="w-2 h-2 rounded-full bg-warning shadow-[0_0_8px_rgba(250,204,21,0.5)]"></div> Warning</span>
-            <span className="flex items-center gap-2 text-danger"><div className="w-2 h-2 rounded-full bg-danger shadow-[0_0_8px_rgba(239,68,68,0.5)]"></div> Critical</span>
+            <span className="flex items-center gap-2 text-danger"><div className="w-2 h-2 rounded-full bg-danger shadow-[0_0_8px_rgba(239,68,68,0.5)]"></div> High Risk</span>
           </div>
         </div>
 
@@ -186,7 +239,7 @@ const Dashboard = memo(function Dashboard() {
           <MapContainer
             center={window.innerWidth < 768 ? [20, 0] : [23, 72]}
             zoom={window.innerWidth < 768 ? 2 : 5}
-            scrollWheelZoom={false}
+            scrollWheelZoom={true}
             style={{ height: "100%", width: "100%", zIndex: 0 }}
           >
             <TileLayer
@@ -207,37 +260,29 @@ const Dashboard = memo(function Dashboard() {
               const riskLevel = shipment.risk?.current?.risk_level || "low";
               const isHigh = riskLevel === "high" || riskLevel === "critical";
               const isMed = riskLevel === "medium";
+              const isSelected = selectedId === shipment.id;
+              const opacity = selectedId && !isSelected ? 0.4 : 1;
 
               const etaDelay = isHigh ? "+4h Delay" : isMed ? "+1.5h Delay" : "On Time";
               const delayClass = isHigh ? "text-danger bg-danger/10" : isMed ? "text-warning bg-warning/10" : "text-success bg-success/10";
 
-              const polylinePositions = shipment.route_waypoints?.filter(
-                (wp) => typeof wp.lat === "number" && typeof wp.lng === "number"
-              ).map((wp) => [wp.lat, wp.lng]) || [];
-
-              const isSelected = selectedId === shipment.id;
-              const opacity = selectedId && selectedId !== shipment.id ? 0.4 : 1;
-
               return (
                 <div key={shipment.id}>
-                  {polylinePositions.length > 1 && (
-                    <Polyline
-                      positions={polylinePositions}
-                      pathOptions={{
-                        color: isSelected ? "#3b82f6" : isHigh ? "#ef4444" : isMed ? "#f97316" : "#22c55e",
-                        weight: isSelected ? 6 : 3,
-                        opacity: isSelected ? 1 : 0.25
-                      }}
+                  {/* Road route line */}
+                  {(shipment.route_waypoints?.length > 1 || shipment.route_geometry_encoded) && (
+                    <RoadRoute
+                      waypoints={shipment.route_waypoints}
+                      geometryEncoded={shipment.route_geometry_encoded}
+                      color={isSelected ? "#3b82f6" : isHigh ? "#ef4444" : isMed ? "#f97316" : "#22c55e"}
                     />
                   )}
 
+                  {/* Shipment truck marker */}
                   <Marker
                     position={[loc.lat, loc.lng]}
                     icon={getMarkerIcon(riskLevel, isSelected, theme)}
                     opacity={opacity}
-                    eventHandlers={{
-                      click: () => setSelectedId(prev => prev === shipment.id ? null : shipment.id),
-                    }}
+                    eventHandlers={{ click: () => handleMarkerClick(shipment.id) }}
                   >
                     <Tooltip direction="top" offset={[0, -10]} opacity={1}>
                       <div className="text-xs font-bold">
@@ -271,7 +316,8 @@ const Dashboard = memo(function Dashboard() {
                           </span>
                         </div>
 
-                        {shipment.risk?.current?.reason && (
+                        {shipment.risk?.current?.reason &&
+                          !shipment.risk.current.reason.toLowerCase().includes('unavailable') && (
                           <div className="bg-danger/10 mt-1 p-1 rounded border border-danger/20 text-danger text-[9px]">
                             ⚠️ {shipment.risk.current.reason}
                           </div>
@@ -279,15 +325,52 @@ const Dashboard = memo(function Dashboard() {
                       </div>
                     </Popup>
                   </Marker>
+
+                  {/* Incident markers — only for selected shipment */}
+                  {isSelected && (shipment.route_incidents?.length > 0 ? shipment.route_incidents : (incidentOverride[shipment.id] || []))
+                    .map((incident, idx) => (
+                    <Marker
+                      key={`incident-${shipment.id}-${idx}`}
+                      position={[incident.lat, incident.lng]}
+                      icon={getIncidentIcon(incident.type)}
+                    >
+                      <Popup>
+                        <div className="text-xs min-w-[140px]">
+                          <strong className="text-red-600 block mb-1">
+                            {incident.type.replace(/_/g, ' ')}
+                          </strong>
+                          <span className="text-gray-700">{incident.description}</span>
+                          <br />
+                          <span className="text-gray-400 text-[10px]">
+                            Severity: {SEVERITY_LABELS[incident.severity] || "Unknown"}
+                          </span>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  ))}
                 </div>
               );
             })}
           </MapContainer>
 
-          {/* 🔥 LIVE SUMMARY */}
+          {/* Live summary overlay */}
           <div className="absolute top-6 right-6 bg-theme-secondary/90 p-5 rounded-2xl w-60 z-[1000] border border-theme shadow-2xl backdrop-blur-md">
             <h3 className="font-black text-[10px] uppercase tracking-[0.2em] mb-3 text-theme-secondary">System Pulse</h3>
-
+            {fetchingIncidents > 0 && (
+              <div className="mb-2">
+                <div className="flex justify-between text-[10px] text-theme-secondary mb-1">
+                  <span>Scanning incidents…</span>
+                  <span>{fetchingIncidents} route{fetchingIncidents > 1 ? 's' : ''}</span>
+                </div>
+                <div className="w-full h-1 bg-theme-tertiary rounded-full overflow-hidden">
+                  <motion.div
+                    className="h-full bg-warning rounded-full"
+                    animate={{ x: ['-100%', '100%'] }}
+                    transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
+                  />
+                </div>
+              </div>
+            )}
             {highRiskCount > 0 ? (
               <div className="space-y-1">
                 <p className="text-danger font-black text-sm flex items-center gap-2">
@@ -309,8 +392,18 @@ const Dashboard = memo(function Dashboard() {
                 ACTIVE SHIPMENTS: {shipments.length}
               </p>
             </div>
+            {(() => {
+              const total = shipments.reduce((sum, s) => {
+                const count = s.route_incidents?.length > 0
+                  ? s.route_incidents.length
+                  : (incidentOverride[s.id]?.length ?? 0);
+                return sum + count;
+              }, 0);
+              return total > 0 ? (
+                <p className="mt-1 text-warning text-[11px]">⚠️ {total} active incidents on network</p>
+              ) : null;
+            })()}
           </div>
-
         </div>
       </motion.div>
     </div>
@@ -318,4 +411,3 @@ const Dashboard = memo(function Dashboard() {
 });
 
 export default Dashboard;
-

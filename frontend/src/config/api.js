@@ -32,6 +32,10 @@ export const ENDPOINTS = {
   ROUTES: '/api/routes',
   ROUTE_OPTIMIZE: '/api/routes/optimize',
 
+  // Reroute
+  REROUTE_BY_ID: (id) => `/api/reroute/${id}`,
+  REROUTE_SCORE: (id) => `/api/reroute/${id}/score`,
+
   // Disruptions
   DISRUPTIONS: '/api/disruptions',
   DISRUPTION_BY_ID: (id) => `/api/disruptions/${id}`,

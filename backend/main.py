@@ -74,65 +74,7 @@ app.add_middleware(
     allow_credentials=True,
 )
 
-
-# ── Lightweight rate limiter (per-IP, in-memory) ──────────────────────────────
-_rate_limit_store: dict[str, list[float]] = defaultdict(list)
-RATE_LIMIT_MAX = 120       # requests per window
-RATE_LIMIT_WINDOW = 60.0   # seconds
-
-@app.middleware("http")
-async def rate_limit_middleware(request: Request, call_next):
-    """Simple per-IP rate limiter. Skips WebSocket upgrades."""
-    # Skip WS upgrades and health/metrics
-    if request.url.path in ("/ws/alerts", "/health", "/metrics"):
-        return await call_next(request)
-
-    client_ip = request.client.host if request.client else "unknown"
-    now = time.time()
-    window_start = now - RATE_LIMIT_WINDOW
-
-    # Prune old entries
-    _rate_limit_store[client_ip] = [
-        t for t in _rate_limit_store[client_ip] if t > window_start
-    ]
-
-    if len(_rate_limit_store[client_ip]) >= RATE_LIMIT_MAX:
-        return JSONResponse(
-            status_code=429,
-            content={"detail": "Too many requests. Please slow down."},
-        )
-
-    _rate_limit_store[client_ip].append(now)
-    return await call_next(request)
-
-
-# ── Auth middleware (check Bearer on /api/* routes) ───────────────────────────
-@app.middleware("http")
-async def auth_middleware(request: Request, call_next):
-    """Check Bearer token on all /api/* routes. Skip public paths, WebSocket, and CORS preflight."""
-    path = request.url.path
-
-    # Skip CORS preflight — OPTIONS must pass through to CORSMiddleware
-    if request.method == "OPTIONS":
-        return await call_next(request)
-
-    # Skip public paths, docs, WS, metrics, and non-API routes
-    if path in _PUBLIC_PATHS or path in ("/metrics",) or not path.startswith("/api/") or path == "/ws/alerts":
-        return await call_next(request)
-
-    # Check Authorization header
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return JSONResponse(status_code=401, content={"detail": "Missing API key"})
-
-    token = auth_header[7:]  # Strip "Bearer "
-    if token != API_KEY:
-        return JSONResponse(status_code=401, content={"detail": "Invalid API key"})
-
-    return await call_next(request)
-
-
-from routers import shipments, risk, reroute, websocket, dashboard, cascade, notifications, scenario
+from routers import shipments, risk, reroute, websocket, dashboard, cascade, notifications, scenario, incidents
 
 app.include_router(dashboard.router)
 app.include_router(shipments.router)
@@ -142,6 +84,7 @@ app.include_router(websocket.router)
 app.include_router(cascade.router)
 app.include_router(notifications.router)
 app.include_router(scenario.router)
+app.include_router(incidents.router)
 
 
 # ── Input validation helper ──────────────────────────────────────────────────

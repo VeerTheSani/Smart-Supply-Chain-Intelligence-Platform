@@ -17,9 +17,7 @@ ORS_URL = "https://api.openrouteservice.org/v2/directions/driving-car/geojson"
 WAYPOINT_INTERVAL_KM = 50
 
 
-# Haversine distance formula
 def _haversine_km(lat1, lng1, lat2, lng2) -> float:
-    """Straight-line distance in km between two coordinates."""
     R = 6371
     d_lat = math.radians(lat2 - lat1)
     d_lng = math.radians(lng2 - lng1)
@@ -29,17 +27,14 @@ def _haversine_km(lat1, lng1, lat2, lng2) -> float:
          * math.sin(d_lng / 2) ** 2)
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
-# Extract one waypoint coordinate every 50km along the route
-def _extract_waypoints_every_50km(coordinates: list) -> list[dict]:
 
+def _extract_waypoints_every_50km(coordinates: list) -> list[dict]:
     if not coordinates:
         return []
 
     waypoints = []
     accumulated_km = 0.0
     prev = coordinates[0]
-
-
     waypoints.append({"lat": prev[1], "lng": prev[0]})
 
     for coord in coordinates[1:]:
@@ -52,7 +47,6 @@ def _extract_waypoints_every_50km(coordinates: list) -> list[dict]:
 
         prev = coord
 
-    # Always include destination if not already added
     last = coordinates[-1]
     last_dict = {"lat": last[1], "lng": last[0]}
     if waypoints[-1] != last_dict:
@@ -61,16 +55,12 @@ def _extract_waypoints_every_50km(coordinates: list) -> list[dict]:
     return waypoints
 
 
-# Main function
-
 async def get_route(
     origin_coords: dict,
     dest_coords: dict,
     alternatives: bool = False,
 ) -> dict:
     """
-
-
     Get route from ORS between two coordinate dicts {"lat", "lng"}.
 
     Returns:
@@ -78,6 +68,7 @@ async def get_route(
         "waypoints":               list of {"lat", "lng"} every 50km,
         "distance_km":             float,
         "duration_seconds":        int,
+        "eta_hours":               float,
         "alternatives":            list of alternative route dicts (if requested)
     }
 
@@ -88,11 +79,11 @@ async def get_route(
 
     body = {
         "coordinates": [
-            [origin_coords["lng"], origin_coords["lat"]],   # ORS uses [lng, lat]
+            [origin_coords["lng"], origin_coords["lat"]],
             [dest_coords["lng"],   dest_coords["lat"]],
         ],
         "instructions": False,
-        "geometry_simplify": False,   # full geometry for accurate sampling
+        "geometry_simplify": False,
     }
 
     if alternatives:
@@ -125,7 +116,6 @@ async def get_route(
     if not features:
         raise RuntimeError("ORS returned no routes")
 
-    # ── Primary route ──────────────────────────────────────────────────────────
     primary     = features[0]
     coordinates = primary["geometry"]["coordinates"]
     summary     = primary["properties"]["summary"]
@@ -134,11 +124,10 @@ async def get_route(
         "waypoints":        _extract_waypoints_every_50km(coordinates),
         "distance_km":      round(summary["distance"] / 1000, 2),
         "duration_seconds": int(summary["duration"]),
+        "eta_hours":        round(int(summary["duration"]) / 3600, 2),
         "alternatives":     [],
-        "eta_hours": round(int(summary["duration"]) / 3600, 2),  # converting the seconds in hours of ETA
     }
 
-    # alternative coordi/path waypoints
     for feature in features[1:]:
         alt_coords  = feature["geometry"]["coordinates"]
         alt_summary = feature["properties"]["summary"]
@@ -146,35 +135,12 @@ async def get_route(
             "waypoints":        _extract_waypoints_every_50km(alt_coords),
             "distance_km":      round(alt_summary["distance"] / 1000, 2),
             "duration_seconds": int(alt_summary["duration"]),
-            "eta_hours": round(int(summary["duration"]) / 3600, 2),  # converting the seconds in hours of ETA
+            "eta_hours":        round(int(alt_summary["duration"]) / 3600, 2),
         })
 
     logger.info(
-        f"Route computed: {result['distance_km']}km, "
+        f"ORS route: {result['distance_km']}km, "
         f"{result['duration_seconds']//3600}h {(result['duration_seconds']%3600)//60}m, "
         f"{len(result['waypoints'])} waypoints"
     )
     return result
-
-
-# ── Self test ──────────────────────────────────────────────────────────────────
-if __name__ == "__main__":
-    import asyncio
-
-    async def test():
-        # Mumbai to Delhi
-        origin = {"lat": 19.0760, "lng": 72.8777}
-        dest   = {"lat": 28.6139, "lng": 77.2090}
-
-        print("Fetching route Mumbai to Delhi...")
-        route = await get_route(origin, dest)
-
-        print(f"\nDistance        : {route['distance_km']} km")
-        print(f"Duration        : {route['duration_seconds'] // 3600}h "
-              f"{(route['duration_seconds'] % 3600) // 60}m")
-        print(f"Waypoints (50km): {len(route['waypoints'])}")
-        print("\nWaypoints:")
-        for i, wp in enumerate(route['waypoints']):
-            print(f"  {i+1:2}. lat={wp['lat']:.4f}, lng={wp['lng']:.4f}")
-
-    asyncio.run(test())

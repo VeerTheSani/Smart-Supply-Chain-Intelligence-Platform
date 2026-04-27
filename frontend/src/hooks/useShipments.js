@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchShipments, createShipment, fetchRerouteData } from '../api/shipmentApi';
+import { fetchShipments, createShipment, updateShipment, deleteShipment, fetchRerouteData, scoreRerouteAlternatives } from '../api/shipmentApi';
 
 import { useEffect } from 'react';
 import { useCountdownStore } from '../stores/countdownStore';
@@ -70,9 +70,29 @@ export const useCreateShipment = () => {
 };
 
 /**
- * Hook for fetching rerouting advice for a specific shipment.
- * @param {string} shipmentId 
- * @param {Object} options React Query options
+ * Hook for updating a shipment.
+ */
+export const useUpdateShipment = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }) => updateShipment(id, payload),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['shipments'] }),
+  });
+};
+
+/**
+ * Hook for deleting a shipment.
+ */
+export const useDeleteShipment = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => deleteShipment(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['shipments'] }),
+  });
+};
+
+/**
+ * Hook for fetching rerouting alternatives (fast — traffic only).
  */
 export const useRerouting = (shipmentId, options = {}) => {
   return useQuery({
@@ -80,6 +100,16 @@ export const useRerouting = (shipmentId, options = {}) => {
     queryFn: () => fetchRerouteData(shipmentId),
     enabled: !!shipmentId,
     retry: 1,
-    ...options
+    staleTime: Infinity,
+    ...options,
+  });
+};
+
+/**
+ * Hook for on-demand full risk scoring (weather + traffic).
+ */
+export const useScoreReroute = () => {
+  return useMutation({
+    mutationFn: ({ id, alternatives }) => scoreRerouteAlternatives(id, alternatives),
   });
 };
