@@ -84,81 +84,59 @@ const LiveAlertItem = memo(function LiveAlertItem({ alert, onDismiss }) {
   };
 
   return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, x: 50, scale: 0.9 }}
-      animate={{ opacity: 1, x: 0, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
-      onMouseEnter={() => setIsPaused(true)}
-      onMouseLeave={() => setIsPaused(false)}
-      onClick={handleAction}
-      className={cn(
-        "relative group bg-[#0f172a]/95 backdrop-blur-xl border border-white/5 shadow-2xl rounded-2xl p-4 w-[380px] cursor-pointer hover:border-white/10 transition-all border-l-4",
-        getSeverityStyles(alert.level),
-        alert.level === 'high' || alert.level === 'critical' ? "shadow-[0_0_20px_rgba(239,68,68,0.15)]" : ""
-      )}
-    >
-      <div className="flex flex-col gap-2">
-        {/* Header: Title + Close */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 overflow-hidden">
-            <div className={cn(
-              "w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
-              alert.level === 'high' || alert.level === 'critical' ? "bg-danger/20 text-danger" : "bg-warning/20 text-warning"
-            )}>
-              <AlertTriangle className="w-4 h-4" />
-            </div>
-            <span className="text-sm font-black text-white truncate uppercase tracking-tight">
-              Shipment {alert.shipment_id?.slice(-6)} • {alert.level}
-            </span>
-          </div>
-          <button 
-            onClick={(e) => { e.stopPropagation(); onDismiss(alert.id); }}
-            className="text-gray-500 hover:text-white p-2 rounded-xl hover:bg-white/5 transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+  <motion.div
+    layout
+    initial={{ opacity: 0, x: 40 }}
+    animate={{ opacity: 1, x: 0 }}
+    exit={{ opacity: 0, x: 40 }}
+    onMouseEnter={() => setIsPaused(true)}
+    onMouseLeave={() => setIsPaused(false)}
+    onClick={handleAction}
+    className="relative group bg-slate-900/80 backdrop-blur-xl border border-slate-700 rounded-xl p-3 w-[300px] shadow-xl hover:border-slate-500 transition-all cursor-pointer"
+  >
+    {/* HEADER */}
+    <div className="flex items-center justify-between mb-2">
+      <span className={`text-[10px] font-semibold uppercase ${
+        alert.badge === "REAL" ? "text-red-400" : "text-blue-400"
+      }`}>
+        {alert.badge === "REAL" ? "REAL SYSTEM" : "SCENARIO LAB"}
+      </span>
 
-        {/* Content: Location • Issue */}
-        <div className="flex items-center gap-2 text-[11px] text-gray-400 font-bold">
-          <span className="flex items-center gap-1.5 bg-white/5 px-2 py-1 rounded-lg">
-            <MapPin className="w-3.5 h-3.5" />
-            {alert.location || 'Vadodara'}
-          </span>
-          <span className="opacity-30">/</span>
-          <span className="truncate max-w-[160px] opacity-80">
-            {alert.message?.slice(0, 60) || 'Route disruption detected'}
-          </span>
-        </div>
+      <button
+        onClick={(e) => { e.stopPropagation(); onDismiss(alert.id); }}
+        className="text-gray-500 hover:text-white text-xs"
+      >
+        ✕
+      </button>
+    </div>
 
-        {/* Impact Highlight */}
-        <div className={cn(
-          "text-[11px] font-black flex items-center gap-2 mt-1",
-          getImpactColor(alert.level)
-        )}>
-          <div className={cn(
-            "w-2 h-2 rounded-full animate-pulse shadow-[0_0_8px_currentColor]",
-            alert.level === 'high' || alert.level === 'critical' ? 'bg-danger' : 'bg-warning'
-          )} />
-          <span className="uppercase tracking-widest">{alert.impact || 'Delays and diversions expected'}</span>
-        </div>
+    {/* MAIN CONTENT */}
+    <div className="flex items-center gap-2 text-xs text-gray-300">
+      <span className="text-yellow-400">⚠️</span>
+      <span className="truncate">
+        {alert.message || 'Alert detected'}
+      </span>
+    </div>
 
-        {/* View Details Hint (only on hover) */}
-        <div className="absolute bottom-2 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] font-bold text-white/40">
-          <Info className="w-3 h-3" />
-          CLICK TO ANALYZE
-        </div>
-      </div>
-    </motion.div>
-  );
+    {/* STATUS */}
+    <div className="text-[10px] text-green-400 font-semibold mt-2">
+      ● STATUS UPDATE
+    </div>
+
+    {/* FOOTER */}
+    <div className="text-[10px] text-gray-500 mt-1">
+      {alert.shipment_id?.slice(-6)}
+    </div>
+
+  </motion.div>
+);
 });
 
 const LiveAlertPanel = memo(function LiveAlertPanel() {
-  const { alerts, dismissAlert, wsConnected } = useAlertStore();
+  const { realAlerts, simAlerts, dismissRealAlert, dismissSimAlert, wsConnected } = useAlertStore();
 
   return (
-    <div className="fixed bottom-6 right-6 z-[60] flex flex-col-reverse gap-3 pointer-events-none">
+    <div className="fixed bottom-6 right-6 max-w-[320px] z-[60] flex flex-col-reverse gap-3 pointer-events-none">
       {/* Reconnection Alert */}
       {!wsConnected && (
         <motion.div 
@@ -171,17 +149,44 @@ const LiveAlertPanel = memo(function LiveAlertPanel() {
         </motion.div>
       )}
       
+      {/* SECTION 1: REAL SYSTEM ALERTS (Production) */}
       <div className="flex flex-col-reverse gap-3 pointer-events-auto">
         <AnimatePresence mode="popLayout">
-          {alerts.slice(0, 3).map((alert) => (
-            <LiveAlertItem 
-              key={alert.id} 
-              alert={alert} 
-              onDismiss={dismissAlert} 
-            />
+          {realAlerts.slice(0, 3).map((alert) => (
+            <motion.div key={alert.id} layout initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}>
+              <LiveAlertItem 
+                alert={{...alert, badge: "REAL"}}
+                onDismiss={dismissRealAlert}
+              />
+            </motion.div>
           ))}
         </AnimatePresence>
       </div>
+
+      {/* SECTION 2: SIMULATOR ALERTS (Scenario Lab) */}
+      {simAlerts.length > 0 && (
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+     className="bg-slate-900/80 border border-blue-500/20 rounded-xl p-3 backdrop-blur-lg shadow-lg"
+        >
+          <div className="text-[10px] font-bold text-blue-400 uppercase tracking-widest px-2 py-1 mb-2">
+            🧪 SCENARIO LAB
+          </div>
+          <div className="flex flex-col-reverse gap-2 pointer-events-auto">
+            <AnimatePresence mode="popLayout">
+              {simAlerts.slice(0, 2).map((alert) => (
+                <motion.div key={alert.id} layout initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}>
+                  <LiveAlertItem 
+                    alert={{...alert, badge: "SIM"}}
+                    onDismiss={dismissSimAlert}
+                  />
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
+        </motion.div>
+      )}
     </div>
   );
 });

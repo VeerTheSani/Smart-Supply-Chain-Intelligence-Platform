@@ -2,10 +2,11 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from routers import scenario
 
-from routers import shipments, risk, reroute, websocket
 from core.scheduler import start_scheduler, stop_scheduler
 
+from routers import shipments, risk, reroute, websocket, dashboard, incidents, notifications
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -22,6 +23,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.include_router(scenario.router, prefix="/api/scenario")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -36,6 +39,7 @@ app.include_router(risk.router)
 app.include_router(reroute.router)
 app.include_router(websocket.router)
 app.include_router(incidents.router)
+app.include_router(notifications.router)
 
 
 

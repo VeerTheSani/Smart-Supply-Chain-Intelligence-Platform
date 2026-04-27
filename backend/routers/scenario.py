@@ -21,14 +21,22 @@ from pydantic import BaseModel
 
 from core.websocket_manager import manager
 from core.countdown_manager import countdown_manager
+from core.event_factory import (
+    create_risk_alert,
+    create_scenario_update,
+    create_decision_triggered,
+    create_countdown_started,
+    create_reroute_executed,
+    create_countdown_cancelled,
+)
 from database import db
 
-router = APIRouter(prefix="/api/scenario", tags=["scenario"])
+router = APIRouter(tags=["scenario"])
 logger = logging.getLogger(__name__)
 
 COUNTDOWN_SECONDS = 10  # simulation countdown (shorter than production 120s)
 
-RISK_LEVELS = [(30, "LOW"), (60, "MEDIUM"), (85, "HIGH"), (float("inf"), "CRITICAL")]
+RISK_LEVELS = [(30, "LOW"), (70, "MEDIUM"), (90, "HIGH"), (float("inf"), "CRITICAL")]
 
 # Track active auto-execute tasks so they can be cancelled
 _auto_execute_tasks: dict[str, asyncio.Task] = {}
@@ -180,8 +188,8 @@ def _compute_delay(risk_score: float, base_hours: float, scenario: str, severity
 
 async def _auto_execute_after_countdown(simulation_id: str, shipment_id: str, countdown_seconds: int):
     """
-    Background task: waits for countdown to expire, then auto-executes reroute.
-    Can be cancelled if user accepts or cancels before expiry.
+    Background task: waits for countdown to expire, then broadcasts result.
+    CRITICAL: Does NOT modify real shipments. Simulation is ephemeral.
     """
     try:
         await asyncio.sleep(countdown_seconds)
@@ -192,61 +200,52 @@ async def _auto_execute_after_countdown(simulation_id: str, shipment_id: str, co
             logger.info(f"Auto-execute skipped for {simulation_id}: status={sim.get('status') if sim else 'not found'}")
             return
 
-        # Execute the reroute
+        # Fetch shipment (for context only - DO NOT MODIFY)
         shipment = await db.shipments.find_one({"_id": ObjectId(shipment_id)})
         if not shipment:
             logger.error(f"Auto-execute failed: shipment {shipment_id} not found")
             return
 
+        # SAFETY CHECK: Ensure we're only dealing with SIM scenarios
+        # Never modify real production shipments
+        if shipment.get("system_mode") == "REAL":
+            logger.error(f"SAFETY VIOLATION PREVENTED: Attempted to modify REAL shipment {shipment_id} from simulator")
+            return
+
         now = datetime.now(timezone.utc)
-        ai_route = sim.get("ai_route", [])
 
-        if ai_route:
-            await db.shipments.update_one(
-                {"_id": ObjectId(shipment_id)},
-                {"$set": {
-                    "route_waypoints": ai_route,
-                    "distance_km": sim.get("ai_distance_km"),
-                    "eta_hours": sim.get("ai_eta_hours"),
-                    "expected_travel_seconds": sim.get("ai_eta_hours", 1) * 3600,
-                    "started_at": now,
-                    "status": "rerouting",
-                    "updated_at": now,
-                }}
-            )
-
-        # Mark decision as auto-executed
+        # Mark decision as auto-executed (SIM collection only)
         await db.simulation_decisions.update_one(
             {"_id": ObjectId(simulation_id)},
             {"$set": {"status": "auto_executed", "executed_at": now}}
         )
 
-        # Broadcast reroute_executed
+        # Broadcast reroute_executed with SIMULATOR source
         shipment_name = shipment.get("shipment_name", shipment.get("origin_name", "Unknown"))
-        await manager.broadcast({
-            "type": "reroute_executed",
-            "simulation_id": simulation_id,
-            "shipment_id": shipment_id,
-            "shipment_name": shipment_name,
-            "auto": True,
-            "success": True,
-            "timestamp": now.isoformat(),
-        })
+        msg = create_reroute_executed(
+            shipment_id=shipment_id,
+            shipment_name=shipment_name,
+            source="SIMULATOR",  # CRITICAL: Mark as simulator
+            success=True,
+            reason="Simulated auto-reroute executed after countdown",
+        )
+        await manager.broadcast(msg)
 
-        # Log notification
+        # Log notification (with source)
         await db.notifications.insert_one({
             "type": "reroute_executed",
+            "source": "SIMULATOR",
             "shipment_id": shipment_id,
-            "title": "Auto-Reroute Executed (Scenario Lab)",
-            "message": f"{shipment_name} was auto-rerouted after countdown expired.",
+            "title": "[SIM] Auto-Reroute Executed",
+            "message": f"{shipment_name} was rerouted in the scenario simulation.",
             "action_taken": "auto_rerouted",
-            "impact": f"AI route applied. Distance: {sim.get('ai_distance_km', 0)} km.",
+            "impact": f"Simulated AI route. Distance: {sim.get('ai_distance_km', 0)} km.",
             "severity": "critical",
             "read": False,
             "timestamp": now.isoformat(),
         })
 
-        logger.info(f"Auto-execute complete: rerouted {shipment_id} via simulation {simulation_id}")
+        logger.info(f"Auto-execute complete (SIM): simulation {simulation_id} on shipment {shipment_id}")
 
     except asyncio.CancelledError:
         logger.info(f"Auto-execute cancelled for {simulation_id}")
@@ -444,27 +443,26 @@ async def run_scenario(request: ScenarioRequest):
         }
 
         # ── PHASE 3b: WEBSOCKET EVENTS ────────────────────────────────────
-        await manager.broadcast({
-            "type": "scenario_update",
-            "simulation_id": simulation_id,
-            "shipment_id": request.shipment_id,
-            "data": response,
-            "timestamp": now.isoformat(),
-        })
+        msg = create_scenario_update(
+            scenario_id=simulation_id,
+            scenario_name=f"{request.scenario.upper()} ({request.severity.upper()})",
+            status="running",
+            message=f"Scenario simulation in progress for {request.scenario} ({request.severity})",
+        )
+        await manager.broadcast(msg)
 
         if should_reroute:
-            # 1) Broadcast decision_triggered
-            await manager.broadcast({
-                "type": "decision_triggered",
-                "simulation_id": simulation_id,
-                "shipment_id": request.shipment_id,
-                "action": "reroute",
-                "risk_level": baseline_level,
-                "countdown": countdown_seconds,
-                "timestamp": now.isoformat(),
-            })
+            # 1) Broadcast decision_triggered (SIM)
+            msg_decision = create_decision_triggered(
+                shipment_id=request.shipment_id,
+                shipment_name=shipment.get("shipment_name", "Unknown"),
+                source="SIMULATOR",
+                decision_type="auto_reroute",
+                risk_level=baseline_level.lower(),
+            )
+            await manager.broadcast(msg_decision)
 
-            # 2) Start countdown via countdown_manager
+            # 2) Start countdown via countdown_manager (must pass source="SIMULATOR")
             shipment_name = shipment.get("shipment_name", shipment.get("origin_name", "Unknown"))
             await countdown_manager.start_countdown(
                 shipment_id=request.shipment_id,
@@ -472,19 +470,10 @@ async def run_scenario(request: ScenarioRequest):
                 shipment=shipment,
                 decision_id=simulation_id,
                 seconds=countdown_seconds,
+                source="SIMULATOR",  # CRITICAL: Mark as SIMULATOR
             )
 
-            # 3) Broadcast countdown_started
-            await manager.broadcast({
-                "type": "countdown_started",
-                "simulation_id": simulation_id,
-                "shipment_id": request.shipment_id,
-                "shipment_name": shipment_name,
-                "seconds_remaining": countdown_seconds,
-                "timestamp": now.isoformat(),
-            })
-
-            # 4) Launch auto-execute background task
+            # 4) Launch auto-execute background task (SIM only)
             # Cancel any existing task for this simulation
             existing_task = _auto_execute_tasks.get(simulation_id)
             if existing_task and not existing_task.done():
@@ -514,7 +503,10 @@ async def run_scenario(request: ScenarioRequest):
 
 @router.post("/accept")
 async def accept_scenario(request: ScenarioAcceptRequest):
-    """User accepts the AI recommendation — execute reroute immediately."""
+    """
+    User accepts the AI recommendation — marks decision as accepted.
+    CRITICAL: Does NOT modify real shipments. Simulation is ephemeral and for what-if analysis only.
+    """
     sim = await db.simulation_decisions.find_one({"_id": ObjectId(request.simulation_id)})
     if not sim:
         raise HTTPException(status_code=404, detail="Simulation decision not found")
@@ -526,6 +518,11 @@ async def accept_scenario(request: ScenarioAcceptRequest):
     if not shipment:
         raise HTTPException(status_code=404, detail="Shipment not found")
 
+    # SAFETY CHECK: Only SIM scenarios — never modify real shipments
+    if shipment.get("system_mode") == "REAL":
+        logger.error(f"SAFETY VIOLATION PREVENTED: Attempted to execute simulated reroute on REAL shipment {shipment_id}")
+        raise HTTPException(status_code=403, detail="Cannot apply scenario to real shipments")
+
     now = datetime.now(timezone.utc)
 
     # Cancel auto-execute background task
@@ -533,54 +530,38 @@ async def accept_scenario(request: ScenarioAcceptRequest):
     if existing_task and not existing_task.done():
         existing_task.cancel()
 
-    # Update shipment route in production DB
-    ai_route = sim.get("ai_route", [])
-    if ai_route:
-        await db.shipments.update_one(
-            {"_id": ObjectId(shipment_id)},
-            {"$set": {
-                "route_waypoints": ai_route,
-                "distance_km": sim.get("ai_distance_km"),
-                "eta_hours": sim.get("ai_eta_hours"),
-                "expected_travel_seconds": sim.get("ai_eta_hours", 1) * 3600,
-                "started_at": now,
-                "status": "rerouting",
-                "updated_at": now,
-            }}
-        )
-
-    # Mark simulation decision as executed
+    # Mark simulation decision as executed (SIM collection only)
     await db.simulation_decisions.update_one(
         {"_id": ObjectId(request.simulation_id)},
         {"$set": {"status": "executed", "executed_at": now}}
     )
 
-    # WebSocket events
+    # Broadcast reroute_executed with SIMULATOR source
     shipment_name = shipment.get("shipment_name", shipment.get("origin_name", "Unknown"))
-    await manager.broadcast({
-        "type": "reroute_executed",
-        "simulation_id": request.simulation_id,
-        "shipment_id": shipment_id,
-        "shipment_name": shipment_name,
-        "auto": False,
-        "success": True,
-        "timestamp": now.isoformat(),
-    })
+    msg = create_reroute_executed(
+        shipment_id=shipment_id,
+        shipment_name=shipment_name,
+        source="SIMULATOR",  # CRITICAL: Mark as simulator
+        success=True,
+        reason="Simulated reroute accepted by user",
+    )
+    await manager.broadcast(msg)
 
-    # Log notification
+    # Log notification (with source)
     await db.notifications.insert_one({
         "type": "reroute_executed",
+        "source": "SIMULATOR",
         "shipment_id": shipment_id,
-        "title": "Route Optimized (Scenario Lab)",
-        "message": f"{shipment_name} was rerouted via Scenario Lab simulation.",
+        "title": "[SIM] Route Accepted",
+        "message": f"{shipment_name} reroute was accepted in the scenario simulation.",
         "action_taken": "rerouted",
-        "impact": f"AI route applied. Distance: {sim.get('ai_distance_km', 0)} km.",
+        "impact": f"Simulated AI route. Distance: {sim.get('ai_distance_km', 0)} km.",
         "severity": "critical",
         "read": False,
         "timestamp": now.isoformat(),
     })
 
-    logger.info(f"Scenario accept: rerouted {shipment_id} via simulation {request.simulation_id}")
+    logger.info(f"Scenario accept (SIM): simulation {request.simulation_id} on shipment {shipment_id}")
     return {"status": "executed", "shipment_id": shipment_id}
 
 
@@ -607,12 +588,13 @@ async def cancel_scenario(request: ScenarioCancelRequest):
         {"$set": {"status": "cancelled", "cancelled_at": now}}
     )
 
-    await manager.broadcast({
-        "type": "countdown_cancelled",
-        "simulation_id": request.simulation_id,
-        "shipment_id": sim["shipment_id"],
-        "timestamp": now.isoformat(),
-    })
+    # Broadcast countdown_cancelled with SIMULATOR source
+    msg = create_countdown_cancelled(
+        shipment_id=sim["shipment_id"],
+        source="SIMULATOR",  # CRITICAL: Mark as simulator
+        reason="User cancelled simulation",
+    )
+    await manager.broadcast(msg)
 
-    logger.info(f"Scenario cancel: {request.simulation_id}")
+    logger.info(f"Scenario cancel (SIM): {request.simulation_id}")
     return {"status": "cancelled", "simulation_id": request.simulation_id}

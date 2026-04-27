@@ -104,7 +104,7 @@ function RealTimeTruck({ position, shipmentName, rerouted }) {
   useEffect(() => {
     if (!position || !prevPosRef.current) return;
     if (position.lat === prevPosRef.current.lat && position.lng === prevPosRef.current.lng) return;
-    
+
     setAngle(getAngle(prevPosRef.current, position));
     prevPosRef.current = position;
   }, [position?.lat, position?.lng]);
@@ -136,21 +136,21 @@ const ScenarioLab = memo(function ScenarioLab() {
   const shipments = useShipmentStore(s => s.shipments);
 
   const [shipmentId, setShipmentId] = useState('');
-  const [scenario, setScenario]     = useState('storm');
-  const [severity, setSeverity]     = useState('medium');
-  const [loading, setLoading]       = useState(false);
-  const [result, setResult]         = useState(null);
-  const [error, setError]           = useState(null);
-  const [mapKey, setMapKey]         = useState(0);
+  const [scenario, setScenario] = useState('storm');
+  const [severity, setSeverity] = useState('medium');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  const [mapKey, setMapKey] = useState(0);
 
   // Countdown
-  const [countdown, setCountdown]           = useState(0);
-  const [simId, setSimId]                   = useState(null);
-  const [decided, setDecided]               = useState(false);
+  const [countdown, setCountdown] = useState(0);
+  const [simId, setSimId] = useState(null);
+  const [decided, setDecided] = useState(false);
   const [countdownActive, setCountdownActive] = useState(false);
-  const [execStatus, setExecStatus]         = useState(null); // 'accepted'|'auto_executed'|'cancelled'
-  const timerRef        = useRef(null);
-  const autoExecRef     = useRef(null);
+  const [execStatus, setExecStatus] = useState(null); // 'accepted'|'auto_executed'|'cancelled'
+  const timerRef = useRef(null);
+  const autoExecRef = useRef(null);
 
   useEffect(() => { if (shipments.length > 0 && !shipmentId) setShipmentId(shipments[0].id); }, [shipments, shipmentId]);
   useEffect(() => { setMapKey(k => k + 1); }, [theme]);
@@ -181,8 +181,13 @@ const ScenarioLab = memo(function ScenarioLab() {
         shipment_id: shipmentId, scenario, severity,
       });
       setResult(data); setSimId(data.simulation_id);
-      if (data.decision?.action === 'reroute' && data.decision?.countdown > 0) {
-        setCountdown(data.decision.countdown); setCountdownActive(true);
+      if (
+        data.decision?.action === 'reroute' &&
+        data.decision?.countdown > 0 &&
+        ['HIGH', 'CRITICAL'].includes(data.risk?.level)
+      ) {
+        setCountdown(data.decision.countdown);
+        setCountdownActive(true);
       }
       setMapKey(k => k + 1);
       toast.success('Simulation complete');
@@ -301,38 +306,57 @@ const ScenarioLab = memo(function ScenarioLab() {
           {/* Decision Alert (inline) */}
           <AnimatePresence>
             {showDecision && (
-              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-                className="rounded-xl border border-danger/30 bg-danger/5 p-3 space-y-3">
-                <div className="flex items-center gap-2 text-danger font-black text-[11px] uppercase tracking-widest">
-                  <AlertTriangle className="w-4 h-4" /> {result?.risk?.level} Risk Detected
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="rounded-2xl bg-gradient-to-br from-slate-900 to-slate-800 border border-red-500/20 p-4 shadow-xl space-y-3 max-w-[280px]"
+              >
+
+                <div className="flex items-center gap-2 text-red-400 font-bold text-xs uppercase tracking-wider">
+                  <AlertTriangle className="w-4 h-4" />
+                  {result?.risk?.level} Risk Detected
                 </div>
-                <p className="text-theme-secondary text-xs">Recommended: <span className="text-theme-primary font-bold">REROUTE</span></p>
-                <div className="flex items-center gap-2">
-                  <Timer className="w-5 h-5 text-warning" />
-                  <span className="text-2xl font-black text-theme-primary tabular-nums">{countdown}s</span>
-                  <span className="text-theme-secondary text-[10px]">auto-execute</span>
+
+                <div className="text-xs text-gray-400">
+                  Recommended: <span className="text-white font-semibold">REROUTE</span>
                 </div>
-                {/* Progress */}
-                <div className="w-full h-1.5 bg-theme-tertiary rounded-full overflow-hidden">
-                  <motion.div className="h-full bg-danger rounded-full"
-                    initial={{ width: '100%' }}
-                    animate={{ width: `${(countdown / (result?.decision?.countdown || 10)) * 100}%` }}
-                    transition={{ duration: 0.5 }} />
+
+                <div className="flex items-center justify-between bg-black/30 rounded-lg px-3 py-2">
+                  <div className="flex items-center gap-2 text-yellow-400">
+                    <Timer className="w-4 h-4" />
+                    <span className="text-lg font-bold tabular-nums">{countdown}s</span>
+                  </div>
+                  <span className="text-[10px] text-gray-400">auto-execute</span>
                 </div>
-                <div className="flex gap-2">
-                  <button onClick={handleAccept}
-                    className="flex-1 py-2 rounded-xl bg-accent text-white text-xs font-bold flex items-center justify-center gap-1 hover:bg-accent/90 transition-colors cursor-pointer">
-                    <Check className="w-3.5 h-3.5" /> Accept
+
+                <div className="h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                  <motion.div
+                    className="h-full bg-red-500"
+                    animate={{
+                      width: `${(countdown / (result?.decision?.countdown || 10)) * 100}%`
+                    }}
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={handleAccept}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs py-2 rounded-lg font-semibold"
+                  >
+                    Accept
                   </button>
-                  <button onClick={handleCancel}
-                    className="flex-1 py-2 rounded-xl border border-theme text-theme-secondary text-xs font-bold flex items-center justify-center gap-1 hover:bg-theme-tertiary transition-colors cursor-pointer">
-                    <X className="w-3.5 h-3.5" /> Cancel
+                  <button
+                    onClick={handleCancel}
+                    className="flex-1 border border-gray-600 text-gray-400 text-xs py-2 rounded-lg hover:bg-gray-800"
+                  >
+                    Cancel
                   </button>
                 </div>
+
               </motion.div>
             )}
           </AnimatePresence>
-
           {/* Execution toast (inline) */}
           <AnimatePresence>
             {decided && execStatus && (
@@ -410,12 +434,20 @@ const ScenarioLab = memo(function ScenarioLab() {
 
             <FitBounds points={fitPoints} />
             <CustomZoom />
-
+<div className="absolute top-4 left-4 z-[500] bg-black/70 text-white text-[10px] px-3 py-1 rounded-full">
+  AI Route Optimization View
+</div>
             {/* Original route — gray dashed (faded) */}
             {toPos(result?.map?.original_route).length > 1 && (
               <Polyline
-                positions={toPos(result.map.original_route)}
-                pathOptions={{ color: '#9ca3af', weight: 4, opacity: decided ? 0.15 : 0.4, dashArray: '8, 8' }} />
+                positions={toPos(result?.map?.original_route)}
+                pathOptions={{
+                  color: "#94a3b8",
+                  weight: 3,
+                  dashArray: "6 6",
+                  opacity: 0.4
+                }}
+              />
             )}
 
             {/* Pre-sim route */}
@@ -429,7 +461,11 @@ const ScenarioLab = memo(function ScenarioLab() {
             {toPos(result?.map?.ai_route).length > 1 && (
               <Polyline
                 positions={toPos(result.map.ai_route)}
-                pathOptions={{ color: '#3b82f6', weight: 6, opacity: 1 }} />
+                pathOptions={{
+                  color: "#2563eb",
+                  weight: 6,
+                  opacity: 1
+                }} />
             )}
 
             {/* Disruption zone — fades after reroute */}

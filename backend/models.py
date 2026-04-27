@@ -21,6 +21,7 @@ class ShipmentCreate(BaseModel):
     origin_name: str = Field(..., min_length=1, max_length=200)
     destination_name: str = Field(..., min_length=1, max_length=200)
     auto_reroute_enabled: bool = False
+    system_mode: Literal["REAL", "SIM"] = "REAL"  # REAL=production, SIM=scenario lab
     # deadline removed — ETA comes from Mappls routing
 
 
@@ -53,6 +54,7 @@ class ShipmentResponse(BaseModel):
 
     status: Literal["planned", "in_transit", "rerouting", "delivered", "delayed"]
     auto_reroute_enabled: bool
+    system_mode: Literal["REAL", "SIM"] = "REAL"  # Hard separation
 
     # Risk
     last_risk_assessment: Optional[RiskAssessment] = None
