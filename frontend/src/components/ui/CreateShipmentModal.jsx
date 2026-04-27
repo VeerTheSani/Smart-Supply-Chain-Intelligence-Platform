@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useForm } from 'react-hook-form';
 import { X, Package, Plus } from 'lucide-react';
 import { useCreateShipment } from '../../hooks/useShipments';
+import LocationAutocomplete from './LocationAutocomplete';
 import toast from 'react-hot-toast';
 import { cn } from '../../lib/utils';
 
@@ -18,6 +19,11 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
 
   const createMutation = useCreateShipment();
   const autoReroute = watch('auto_reroute_enabled');
+
+  useEffect(() => {
+    register('origin_name', { required: 'Origin city is required' });
+    register('destination_name', { required: 'Destination city is required' });
+  }, [register]);
 
   useEffect(() => {
     if (!isOpen) reset();
@@ -96,14 +102,11 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
                   <label className="block text-sm font-bold text-theme-secondary mb-2 uppercase tracking-wide">
                     Origin City
                   </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Mumbai, Maharashtra"
-                    {...register('origin_name', { required: 'Origin city is required' })}
-                    className={cn(
-                      'w-full bg-theme-tertiary border text-theme-primary text-sm rounded-xl px-4 py-3 focus:ring-2 focus:ring-accent focus:outline-none transition-all',
-                      errors.origin_name ? 'border-danger' : 'border-theme'
-                    )}
+                  <LocationAutocomplete
+                    placeholder="Search origin city..."
+                    value={watch('origin_name')}
+                    onChange={(val) => setValue('origin_name', val, { shouldValidate: true })}
+                    error={errors.origin_name}
                   />
                   {errors.origin_name && (
                     <p className="text-danger text-xs mt-1.5">{errors.origin_name.message}</p>
@@ -115,14 +118,11 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
                   <label className="block text-sm font-bold text-theme-secondary mb-2 uppercase tracking-wide">
                     Destination City
                   </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Delhi, NCT"
-                    {...register('destination_name', { required: 'Destination city is required' })}
-                    className={cn(
-                      'w-full bg-theme-tertiary border text-theme-primary text-sm rounded-xl px-4 py-3 focus:ring-2 focus:ring-accent focus:outline-none transition-all',
-                      errors.destination_name ? 'border-danger' : 'border-theme'
-                    )}
+                  <LocationAutocomplete
+                    placeholder="Search destination city..."
+                    value={watch('destination_name')}
+                    onChange={(val) => setValue('destination_name', val, { shouldValidate: true })}
+                    error={errors.destination_name}
                   />
                   {errors.destination_name && (
                     <p className="text-danger text-xs mt-1.5">{errors.destination_name.message}</p>
