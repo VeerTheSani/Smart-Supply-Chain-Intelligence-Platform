@@ -145,6 +145,7 @@ async def geocode(place_name: str) -> dict:
 async def get_route(
     origin_coords: dict,
     dest_coords: dict,
+    via_coords_list: list = None,
     alternatives: bool = False,
 ) -> dict:
     """
@@ -164,10 +165,11 @@ async def get_route(
     token = await get_token()
 
     # Mappls route format: lng,lat;lng,lat
-    coords_str = (
-        f"{origin_coords['lng']},{origin_coords['lat']};"
-        f"{dest_coords['lng']},{dest_coords['lat']}"
-    )
+    coords_str = f"{origin_coords['lng']},{origin_coords['lat']};"
+    if via_coords_list:
+        for v in via_coords_list:
+            coords_str += f"{v['lng']},{v['lat']};"
+    coords_str += f"{dest_coords['lng']},{dest_coords['lat']}"
 
     params = {
         "alternatives": "true" if alternatives else "false",
