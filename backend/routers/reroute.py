@@ -48,6 +48,7 @@ def _label_to_type(label: str) -> str:
         "Fastest":     "Fast but Risky",
         "Safest":      "Safe but Slow",
         "Recommended": "Balanced",
+        "Avoidance":   "Incident Avoidance",
     }
     return mapping.get(label, label)
 
@@ -61,8 +62,8 @@ def _transform_for_frontend(result: dict, shipment: dict) -> dict:
     current_level = result.get("current_level", "unknown")
 
     # Assign A/B/C route IDs in order: Recommended→A, Fastest→B, Safest→C
-    label_order = ["Recommended", "Fastest", "Safest"]
-    route_ids = ["A", "B", "C"]
+    label_order = ["Recommended", "Fastest", "Safest", "Avoidance"]
+    route_ids = ["A", "B", "C", "D"]
 
     transformed_alts = []
     recommended_route = "A"  # default
@@ -92,7 +93,9 @@ def _transform_for_frontend(result: dict, shipment: dict) -> dict:
             # extra fields
             "label":             label,
             "waypoints":         alt.get("waypoints", []),
+            "geometry_encoded":  alt.get("geometry_encoded", ""),
             "extra_time_minutes": alt.get("extra_time_minutes", 0),
+            "is_avoidance":      alt.get("is_avoidance", False),
         })
 
     # Determine if reroute is actually suggested

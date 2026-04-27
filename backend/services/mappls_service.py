@@ -279,27 +279,36 @@ def _compute_via_point(origin: dict, dest: dict, position: float, offset_km: flo
     """
     Compute a single via-point at `position` (0–1) along the O→D line,
     shifted perpendicular by `offset_km` (positive = right, negative = left).
+
+    Uses metric-space normalisation so the perpendicular is truly 90° on the
+    ground, not skewed by the fact that lng degrees shrink toward the poles.
     """
     pt_lat = origin["lat"] + (dest["lat"] - origin["lat"]) * position
     pt_lng = origin["lng"] + (dest["lng"] - origin["lng"]) * position
 
-    dlat = dest["lat"] - origin["lat"]
-    dlng = dest["lng"] - origin["lng"]
-    length = math.sqrt(dlat ** 2 + dlng ** 2)
+    lat_mid = (origin["lat"] + dest["lat"]) / 2.0
+    cos_lat = math.cos(math.radians(lat_mid))
+
+    # Work in km-equivalent units so the direction vector is metrically correct
+    dlat_km = (dest["lat"] - origin["lat"]) * 111.0
+    dlng_km = (dest["lng"] - origin["lng"]) * 111.0 * cos_lat
+    length   = math.sqrt(dlat_km ** 2 + dlng_km ** 2)
     if length == 0:
         return {"lat": round(pt_lat, 6), "lng": round(pt_lng, 6)}
 
-    dlat_n = dlat / length
-    dlng_n = dlng / length
-    # Right-perpendicular unit vector: rotate direction 90° clockwise
-    perp_lat =  dlng_n
-    perp_lng = -dlat_n
+    dlat_n = dlat_km / length
+    dlng_n = dlng_km / length
+    # Right-perpendicular in metric space (90° clockwise: (x,y) → (y,-x))
+    perp_lat_n =  dlng_n
+    perp_lng_n = -dlat_n
 
-    deg  = abs(offset_km) / 111.0
     sign = 1 if offset_km >= 0 else -1
+    # Convert metric unit-vector back to degree offsets
+    lat_shift = perp_lat_n * abs(offset_km) / 111.0
+    lng_shift = perp_lng_n * abs(offset_km) / (111.0 * cos_lat) if cos_lat > 0 else 0.0
     return {
-        "lat": round(pt_lat + perp_lat * deg * sign, 6),
-        "lng": round(pt_lng + perp_lng * deg * sign, 6),
+        "lat": round(pt_lat + lat_shift * sign, 6),
+        "lng": round(pt_lng + lng_shift * sign, 6),
     }
 
 
@@ -371,6 +380,7 @@ async def get_route_alternatives(
         coords    = _decode_polyline(r.get("geometry", ""))
         return {
             "waypoints":                   _extract_waypoints_every_50km(coords),
+            "geometry_encoded":            r.get("geometry", ""),
             "distance_km":                 round(distance / 1000, 2),
             "duration_seconds":            dur_with,
             "duration_no_traffic_seconds": dur_no_tr,
@@ -389,11 +399,69 @@ async def get_route_alternatives(
     if failed:
         logger.warning(f"{failed}/3 corridor route(s) failed, got {len(valid)} valid")
 
-    if len(valid) < 1:
-        raise RuntimeError("All three corridor routes failed — cannot compute alternatives")
+    if len(valid) < 2:
+        raise RuntimeError(f"Only {len(valid)}/3 corridor routes succeeded — need at least 2 alternatives")
 
     logger.info(f"Alternatives: {len(valid)}/3 corridors computed for {origin_coords} → {dest_coords}")
     return valid
+
+
+async def get_route_through(
+    origin_coords: dict,
+    dest_coords: dict,
+    via_coords: "dict | list[dict]",
+) -> dict | None:
+    """
+    Fetch a single Mappls route that passes through one or more via-points.
+    `via_coords` may be a single dict or a list of dicts (ordered waypoints).
+    Used by the avoidance route logic in reroute_engine.
+    Returns same dict shape as get_route_alternatives entries, or None on failure.
+    """
+    token = await get_token()
+    vias = via_coords if isinstance(via_coords, list) else [via_coords]
+    via_parts = ";".join(f"{v['lng']},{v['lat']}" for v in vias)
+    coords_str = (
+        f"{origin_coords['lng']},{origin_coords['lat']};"
+        f"{via_parts};"
+        f"{dest_coords['lng']},{dest_coords['lat']}"
+    )
+    params = {"traffic": "true", "geometries": "polyline", "overview": "full", "steps": "false"}
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(
+                f"https://apis.mappls.com/advancedmaps/v1/{token}/route_adv/driving/{coords_str}",
+                params=params,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as e:
+        logger.warning(f"Mappls avoidance route fetch failed (via={via_coords}): {e}")
+        return None
+
+    routes = data.get("routes", [])
+    if not routes:
+        return None
+
+    r         = routes[0]
+    dur_with  = int(r.get("duration", 0))
+    distance  = r.get("distance", 0)
+
+    if dur_with == 0 or distance == 0:
+        return None
+
+    dur_no_tr = int(r.get("duration_without_traffic", dur_with))
+    coords    = _decode_polyline(r.get("geometry", ""))
+
+    return {
+        "waypoints":                   _extract_waypoints_every_50km(coords),
+        "geometry_encoded":            r.get("geometry", ""),
+        "distance_km":                 round(distance / 1000, 2),
+        "duration_seconds":            dur_with,
+        "duration_no_traffic_seconds": dur_no_tr,
+        "traffic_ratio":               round(dur_with / dur_no_tr, 3) if dur_no_tr > 0 else 1.0,
+        "eta_hours":                   round(dur_with / 3600, 2),
+    }
 
 
 ## testing this garbage if its any good or another loose

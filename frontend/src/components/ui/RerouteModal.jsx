@@ -1,11 +1,11 @@
 import { memo, useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MapContainer, TileLayer, Polyline, useMap, CircleMarker, Tooltip } from 'react-leaflet';
+import { MapContainer, TileLayer, Polyline, Marker, useMap, CircleMarker, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import {
   X, ActivitySquare, Clock, Route, ShieldAlert,
-  Zap, Shield, Star, CloudRain, CheckCircle2, TrendingUp, MapPin,
+  Zap, Shield, Star, CloudRain, CheckCircle2, TrendingUp, MapPin, AlertTriangle,
 } from 'lucide-react';
 import { useRerouting, useScoreReroute } from '../../hooks/useShipments';
 import { useShipmentStore } from '../../stores/shipmentStore';
@@ -46,9 +46,34 @@ const ROUTE_META = {
     dash: '6 8',
     glow: null,
   },
+  Avoidance: {
+    icon: AlertTriangle,
+    color: 'text-orange-400',
+    bg: 'bg-orange-400/10',
+    border: 'border-orange-400/30',
+    mapColor: '#fb923c',
+    weight: 3,
+    dash: '4 5',
+    glow: '0 0 10px rgba(251,146,60,0.35)',
+  },
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function decodePolyline(encoded) {
+  const coords = [];
+  let index = 0, lat = 0, lng = 0;
+  while (index < encoded.length) {
+    let shift = 0, result = 0, b;
+    do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lat += result & 1 ? ~(result >> 1) : result >> 1;
+    shift = 0; result = 0;
+    do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lng += result & 1 ? ~(result >> 1) : result >> 1;
+    coords.push([lat / 1e5, lng / 1e5]);
+  }
+  return coords;
+}
 
 const riskColor = (level) => {
   switch (level) {
@@ -70,51 +95,59 @@ const riskBarColor = (level) => {
 
 // ── Map sub-components ────────────────────────────────────────────────────────
 
-function FitAlts({ waypoints }) {
+function FitAlts({ alternatives, primaryWaypoints }) {
   const map = useMap();
   const fitted = useRef(false);
 
   useEffect(() => {
     if (fitted.current) return;
-    const pts = waypoints
-      .flat()
-      .filter(wp => wp?.lat != null && wp?.lng != null)
-      .map(wp => [wp.lat, wp.lng]);
+    const pts = [];
+    primaryWaypoints?.forEach(wp => pts.push([wp.lat, wp.lng]));
+    alternatives?.forEach(alt => {
+      if (alt.geometry_encoded) {
+        decodePolyline(alt.geometry_encoded).forEach(p => pts.push(p));
+      } else {
+        alt.waypoints?.forEach(wp => pts.push([wp.lat, wp.lng]));
+      }
+    });
     if (pts.length > 1) {
       map.fitBounds(L.latLngBounds(pts), { padding: [40, 40], maxZoom: 9 });
       fitted.current = true;
     }
-  }, [map, waypoints]);
+  }, [map, alternatives, primaryWaypoints]);
 
   return null;
 }
 
-function RouteMapInner({ alternatives, primaryWaypoints, originCoords, destCoords, currentRoute }) {
-  // Build current-route positions: prefer full waypoints, fall back to straight O→D line
-  const currentPositions = primaryWaypoints?.length > 1
-    ? primaryWaypoints.map(wp => [wp.lat, wp.lng])
-    : (originCoords && destCoords)
-      ? [[originCoords.lat, originCoords.lng], [destCoords.lat, destCoords.lng]]
-      : null;
+const INCIDENT_COLOR = {
+  ROAD_CLOSED: '#ef4444',
+  ACCIDENT:    '#ef4444',
+  JAM:         '#f97316',
+  ROAD_WORKS:  '#f97316',
+};
 
-  const allWaypoints = [
-    currentPositions?.map(([lat, lng]) => ({ lat, lng })),
-    ...alternatives.map(a => a.waypoints),
-  ].filter(a => a?.length > 1);
+const SEVERITY_LABELS = ['Unknown', 'Minor', 'Moderate', 'Major', 'Critical'];
+
+function RouteMapInner({ alternatives, primaryWaypoints, primaryGeometryEncoded, originCoords, destCoords, currentRoute, hoveredId, incidents }) {
+  const currentPositions = primaryGeometryEncoded
+    ? decodePolyline(primaryGeometryEncoded)
+    : primaryWaypoints?.length > 1
+      ? primaryWaypoints.map(wp => [wp.lat, wp.lng])
+      : (originCoords && destCoords)
+        ? [[originCoords.lat, originCoords.lng], [destCoords.lat, destCoords.lng]]
+        : null;
 
   return (
     <>
-      <FitAlts waypoints={allWaypoints} />
+      <FitAlts alternatives={alternatives} primaryWaypoints={primaryWaypoints} />
 
       {/* ── Current route — white/slate, clearly labelled ── */}
       {currentPositions && (
         <>
-          {/* Outer glow layer */}
           <Polyline
             positions={currentPositions}
             pathOptions={{ color: '#ffffff', weight: 6, opacity: 0.06, dashArray: null }}
           />
-          {/* Main line */}
           <Polyline
             positions={currentPositions}
             pathOptions={{ color: '#94a3b8', weight: 3, opacity: 0.85, dashArray: '6 9', lineCap: 'round' }}
@@ -132,9 +165,13 @@ function RouteMapInner({ alternatives, primaryWaypoints, originCoords, destCoord
 
       {/* ── Alternative routes ── */}
       {alternatives.map((alt, i) => {
-        const meta = ROUTE_META[alt.label] ?? ROUTE_META.Recommended;
-        if (!alt.waypoints?.length) return null;
-        const positions = alt.waypoints.map(wp => [wp.lat, wp.lng]);
+        const meta = ROUTE_META[alt.label] ?? ROUTE_META.Avoidance;
+        const positions = alt.geometry_encoded
+          ? decodePolyline(alt.geometry_encoded)
+          : alt.waypoints?.map(wp => [wp.lat, wp.lng]);
+        if (!positions?.length) return null;
+
+        const isHovered = hoveredId === alt.route_id;
 
         return (
           <Polyline
@@ -142,8 +179,8 @@ function RouteMapInner({ alternatives, primaryWaypoints, originCoords, destCoord
             positions={positions}
             pathOptions={{
               color: meta.mapColor,
-              weight: meta.weight,
-              opacity: alt.label === 'Recommended' ? 0.95 : 0.72,
+              weight: isHovered ? meta.weight + 2 : meta.weight,
+              opacity: isHovered ? 1 : 0.55,
               dashArray: meta.dash,
               lineCap: 'round',
               lineJoin: 'round',
@@ -158,7 +195,7 @@ function RouteMapInner({ alternatives, primaryWaypoints, originCoords, destCoord
         );
       })}
 
-      {/* ── Origin marker (green dot) ── */}
+      {/* ── Origin marker ── */}
       {originCoords && (
         <CircleMarker
           center={[originCoords.lat, originCoords.lng]}
@@ -171,7 +208,7 @@ function RouteMapInner({ alternatives, primaryWaypoints, originCoords, destCoord
         </CircleMarker>
       )}
 
-      {/* ── Destination marker (red dot) ── */}
+      {/* ── Destination marker ── */}
       {destCoords && (
         <CircleMarker
           center={[destCoords.lat, destCoords.lng]}
@@ -183,11 +220,47 @@ function RouteMapInner({ alternatives, primaryWaypoints, originCoords, destCoord
           </Tooltip>
         </CircleMarker>
       )}
+
+      {/* ── Incidents on current route — banner style ── */}
+      {incidents?.map((inc, i) => {
+        const color = INCIDENT_COLOR[inc.type] ?? '#facc15';
+        const label = inc.type.replace(/_/g, ' ');
+        const emoji = inc.type === 'ROAD_CLOSED' ? '🚧'
+          : inc.type === 'ACCIDENT' ? '💥'
+          : inc.type === 'JAM' ? '🚦'
+          : inc.type === 'FLOODING' ? '🌊'
+          : inc.type === 'HIGH_WINDS' ? '🌬️'
+          : inc.type === 'ROAD_WORKS' ? '👷'
+          : '⚠️';
+        const icon = L.divIcon({
+          className: '',
+          iconSize: [24, 24],
+          iconAnchor: [12, 12],
+          html: `<div style="font-size:18px;line-height:1;filter:drop-shadow(0 1px 3px rgba(0,0,0,0.7))">${emoji}</div>`,
+        });
+        return (
+          <Marker key={`inc-${i}`} position={[inc.lat, inc.lng]} icon={icon}>
+            <Tooltip direction="top" offset={[0, -4]}>
+              <div style={{ fontSize: 11, maxWidth: 200 }}>
+                <strong style={{ color, display: 'block', marginBottom: 2 }}>
+                  {label}
+                </strong>
+                {inc.description && <span style={{ color: '#334155' }}>{inc.description}</span>}
+                {inc.severity > 0 && (
+                  <span style={{ display: 'block', color: '#64748b', fontSize: 10, marginTop: 2 }}>
+                    Severity: {SEVERITY_LABELS[inc.severity] ?? 'Unknown'}
+                  </span>
+                )}
+              </div>
+            </Tooltip>
+          </Marker>
+        );
+      })}
     </>
   );
 }
 
-function RouteMap({ alternatives, primaryWaypoints, originCoords, destCoords, currentRoute }) {
+function RouteMap({ alternatives, primaryWaypoints, primaryGeometryEncoded, originCoords, destCoords, currentRoute, hoveredId, incidents }) {
   if (!alternatives?.length) return null;
 
   return (
@@ -204,9 +277,12 @@ function RouteMap({ alternatives, primaryWaypoints, originCoords, destCoords, cu
         <RouteMapInner
           alternatives={alternatives}
           primaryWaypoints={primaryWaypoints}
+          primaryGeometryEncoded={primaryGeometryEncoded}
           originCoords={originCoords}
           destCoords={destCoords}
+          incidents={incidents}
           currentRoute={currentRoute}
+          hoveredId={hoveredId}
         />
       </MapContainer>
 
@@ -303,8 +379,8 @@ function StatRow({ icon: Icon, label, children }) {
   );
 }
 
-function RouteCard({ alt, isScoring, index }) {
-  const meta   = ROUTE_META[alt.label] ?? ROUTE_META.Recommended;
+function RouteCard({ alt, isScoring, index, onHover }) {
+  const meta   = ROUTE_META[alt.label] ?? ROUTE_META.Avoidance;
   const Icon   = meta.icon;
   const etaHrs = ((alt.eta ?? alt.duration_seconds ?? 0) / 3600).toFixed(1);
   const hasRisk = alt.risk_assessed;
@@ -315,8 +391,10 @@ function RouteCard({ alt, isScoring, index }) {
       initial={{ opacity: 0, y: 24, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ delay: index * 0.1, duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+      onMouseEnter={() => onHover?.(alt.route_id)}
+      onMouseLeave={() => onHover?.(null)}
       className={cn(
-        'relative rounded-2xl border flex flex-col overflow-hidden',
+        'relative rounded-2xl border flex flex-col overflow-hidden cursor-default',
         meta.border, meta.bg,
         isRec && 'ring-1 ring-indigo-500/35 shadow-lg shadow-indigo-900/30'
       )}
@@ -338,6 +416,17 @@ function RouteCard({ alt, isScoring, index }) {
         </motion.div>
       )}
 
+      {!isRec && alt.is_avoidance && (
+        <motion.div
+          initial={{ opacity: 0, x: 5 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 0.3 }}
+          className="absolute top-2.5 right-3 text-[9px] font-black tracking-[0.12em] text-orange-400 uppercase flex items-center gap-1"
+        >
+          <AlertTriangle className="w-2.5 h-2.5" /> Avoids Closure
+        </motion.div>
+      )}
+
       <div className="p-4 flex flex-col gap-3 flex-1">
         {/* Label */}
         <div className="flex items-center gap-2.5">
@@ -349,6 +438,9 @@ function RouteCard({ alt, isScoring, index }) {
               {alt.label}
             </p>
             <p className="text-slate-600 text-[10px] font-mono">Route {alt.route_id}</p>
+            {alt.label_reason && (
+              <p className="text-slate-600 text-[10px] leading-tight mt-0.5">{alt.label_reason}</p>
+            )}
           </div>
         </div>
 
@@ -362,11 +454,12 @@ function RouteCard({ alt, isScoring, index }) {
               {alt.distance?.toFixed(0) ?? '—'} km
             </span>
           </StatRow>
-          {alt.extra_time_minutes > 0 && (
-            <StatRow icon={TrendingUp} label="Extra time">
-              <span className="text-yellow-400 font-bold tabular-nums">+{alt.extra_time_minutes} min</span>
-            </StatRow>
-          )}
+          <StatRow icon={TrendingUp} label="Extra time">
+            {alt.extra_time_minutes > 0
+              ? <span className="text-yellow-400 font-bold tabular-nums">+{alt.extra_time_minutes} min</span>
+              : <span className="text-emerald-400 font-bold">Same time</span>
+            }
+          </StatRow>
         </div>
 
         {/* Risk */}
@@ -434,13 +527,16 @@ const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
   const { data, isLoading, error } = useRerouting(shipmentId);
   const scoreMutation = useScoreReroute();
   const [scoredAlts, setScoredAlts] = useState(null);
+  const [hoveredAlt, setHoveredAlt] = useState(null);
 
   const shipment = useShipmentStore(
     state => state.shipments.find(s => s.id === shipmentId)
   );
-  const primaryWaypoints = shipment?.route_waypoints;
-  const originCoords     = shipment?.origin_coords;
-  const destCoords       = shipment?.destination_coords;
+  const primaryWaypoints       = shipment?.route_waypoints;
+  const primaryGeometryEncoded = shipment?.route_geometry_encoded;
+  const originCoords           = shipment?.origin_coords;
+  const destCoords             = shipment?.destination_coords;
+  const routeIncidents         = shipment?.route_incidents ?? [];
 
   const alternatives = scoredAlts ?? data?.alternatives ?? [];
   const isScoring    = scoreMutation.isPending;
@@ -455,7 +551,12 @@ const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
         id: shipmentId,
         alternatives: data.alternatives,
       });
-      setScoredAlts(result.scored_alternatives);
+      // Merge scored fields back by route_id, preserving geometry and other fields
+      const merged = (data.alternatives ?? []).map(orig => {
+        const scored = result.scored_alternatives?.find(s => s.route_id === orig.route_id);
+        return scored ? { ...orig, ...scored } : orig;
+      });
+      setScoredAlts(merged);
       toast.success('Risk assessment complete.');
     } catch {
       toast.error('Risk assessment failed. Try again.');
@@ -576,9 +677,12 @@ const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
                     <RouteMap
                       alternatives={alternatives}
                       primaryWaypoints={primaryWaypoints}
+                      primaryGeometryEncoded={primaryGeometryEncoded}
                       originCoords={originCoords}
                       destCoords={destCoords}
                       currentRoute={data?.current_route}
+                      hoveredId={hoveredAlt}
+                      incidents={routeIncidents}
                     />
                   </motion.div>
 
@@ -592,14 +696,20 @@ const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
                     <div className="flex-1 h-px bg-white/[0.05]" />
                   </div>
 
-                  {/* Route cards */}
-                  <div className="grid gap-3 md:grid-cols-3">
+                  {/* Route cards — dynamic grid based on count */}
+                  <div className={cn(
+                    'grid gap-3',
+                    alternatives.length <= 2 ? 'md:grid-cols-2' :
+                    alternatives.length === 4 ? 'md:grid-cols-4' :
+                    'md:grid-cols-3'
+                  )}>
                     {alternatives.map((alt, i) => (
                       <RouteCard
                         key={alt.route_id ?? i}
                         alt={alt}
                         isScoring={isScoring}
                         index={i}
+                        onHover={setHoveredAlt}
                       />
                     ))}
                   </div>

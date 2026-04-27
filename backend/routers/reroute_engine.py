@@ -6,7 +6,7 @@ import asyncio
 import logging
 import math
 
-from services.mappls_service import get_route_alternatives
+from services.mappls_service import get_route_alternatives, get_route_through
 from services.weather_service import score_weather_along_route
 
 logger = logging.getLogger(__name__)
@@ -92,6 +92,111 @@ def _label_routes(routes: list) -> list:
     return result
 
 
+# ── Incident-aware avoidance route ────────────────────────────────────────────
+
+# Incident types worth routing around, ranked by severity
+INCIDENT_PRIORITY = {
+    "ROAD_CLOSED":          5,
+    "FLOODING":             4,
+    "ACCIDENT":             3,
+    "DANGEROUS_CONDITIONS": 2,
+    "ROAD_WORKS":           1,
+}
+
+
+def _avoidance_via_points(incident: dict, origin: dict, dest: dict) -> list[dict]:
+    """
+    Compute TWO via-points that bracket the incident and route fully around it.
+
+    A single via-point only forces a detour to one intermediate location; Mappls
+    then finds the shortest path to the destination from there, which can snap back
+    onto the blocked road.  Two bracketing via-points — one before the closure and
+    one after — keep the bypass corridor intact through the entire closure zone.
+
+    Both points are pushed 90 km to the OPPOSITE side of the route from the incident
+    so Mappls cannot thread back through the closure between them.
+    """
+    from services.mappls_service import _compute_via_point
+
+    dlat      = dest["lat"] - origin["lat"]
+    dlng      = dest["lng"] - origin["lng"]
+    length_sq = dlat ** 2 + dlng ** 2
+
+    if length_sq == 0:
+        mid = _compute_via_point(origin, dest, 0.5, 35)
+        return [mid]
+
+    # Project incident onto the O→D straight line
+    ilat     = incident["lat"] - origin["lat"]
+    ilng     = incident["lng"] - origin["lng"]
+    position = max(0.15, min(0.85, (ilat * dlat + ilng * dlng) / length_sq))
+
+    # Cross product: positive = incident is LEFT of O→D → push RIGHT (+), else push LEFT (-)
+    cross     = dlat * ilng - dlng * ilat
+    offset_km = 35 if cross > 0 else -35
+
+    # Two via-points that tightly bracket the incident (~30-40 km gap each side)
+    # Small spread + small offset = local detour onto a parallel road, not a cross-country loop
+    spread = 0.05
+    via_before = _compute_via_point(origin, dest, max(0.05, position - spread), offset_km)
+    via_after  = _compute_via_point(origin, dest, min(0.95, position + spread), offset_km)
+    return [via_before, via_after]
+
+
+async def _fetch_avoidance_route(shipment: dict) -> dict | None:
+    """
+    Check stored incidents. If there's something severe enough to route around,
+    compute an alternative that bypasses it.
+
+    Only triggers for ROAD_CLOSED, FLOODING, ACCIDENT, DANGEROUS_CONDITIONS.
+    Road works alone is not worth the detour.
+    Returns a scored route dict ready to append to alternatives, or None.
+    """
+    incidents = shipment.get("route_incidents", [])
+    if not incidents:
+        return None
+
+    # Only bother if there's something with priority >= 2 (DANGEROUS_CONDITIONS or worse)
+    severe = [i for i in incidents if INCIDENT_PRIORITY.get(i.get("type", ""), 0) >= 2]
+    if not severe:
+        return None
+
+    worst  = max(severe, key=lambda i: INCIDENT_PRIORITY.get(i.get("type", ""), 0))
+    origin = shipment.get("origin_coords") or shipment.get("current_location")
+    dest   = shipment.get("destination_coords")
+
+    if not origin or not dest:
+        return None
+
+    vias  = _avoidance_via_points(worst, origin, dest)
+    route = await get_route_through(origin, dest, vias)
+
+    if not route:
+        logger.warning("Avoidance route fetch returned nothing — skipping")
+        return None
+
+    traffic_ratio = route.get("traffic_ratio", 1.0)
+    risk_score    = round(float(_threshold(traffic_ratio, TRAFFIC_THRESHOLDS)), 1)
+    risk_level    = _risk_level(risk_score).lower()
+    inc_type      = worst.get("type", "incident").replace("_", " ").title()
+    description   = worst.get("description", inc_type)
+
+    logger.info(f"Avoidance route computed: bypasses {inc_type} at ({worst['lat']:.3f}, {worst['lng']:.3f})")
+
+    return {
+        **route,
+        "risk_score":    risk_score,
+        "risk_level":    risk_level,
+        "weather_score": None,
+        "traffic_score": risk_score,
+        "reason":        f"Avoids {inc_type} — {description}",
+        "risk_assessed": False,
+        "label":         "Avoidance",
+        "label_reason":  f"Routes around {inc_type} on current path",
+        "is_avoidance":  True,
+    }
+
+
 # ── Fast path ─────────────────────────────────────────────────────────────────
 
 async def get_alternatives(shipment: dict) -> dict:
@@ -109,8 +214,8 @@ async def get_alternatives(shipment: dict) -> dict:
     logger.info("Fetching alternative routes (fast path, traffic only)...")
     all_routes = await get_route_alternatives(current_location, dest_coords)
 
-    if len(all_routes) < 1:
-        raise ValueError("Could not compute any alternative routes for this path")
+    if len(all_routes) < 2:
+        raise ValueError("Could not compute at least 2 alternative routes for this path")
 
     # Quick risk estimate from traffic ratio only — no weather API
     routes_scored = []
@@ -129,6 +234,11 @@ async def get_alternatives(shipment: dict) -> dict:
         })
 
     labeled = _label_routes(routes_scored)
+
+    # If incidents exist on current route, try to compute an avoidance alternative
+    avoidance = await _fetch_avoidance_route(shipment)
+    if avoidance:
+        labeled.append(avoidance)
 
     return {
         "shipment_id":   str(shipment.get("_id", "")),

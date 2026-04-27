@@ -263,14 +263,12 @@ const Shipments = memo(function Shipments() {
 
                       <td className="py-4 px-6">
                         <div className="flex items-center justify-end gap-2">
-                          {(isWarning || isCritical) && (
-                            <button
-                              onClick={() => setRerouteId(shipment.id)}
-                              className="bg-purple-600 hover:bg-purple-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 shadow-lg shadow-purple-500/20 transition-all hover:scale-105 active:scale-95 uppercase tracking-wider cursor-pointer"
-                            >
-                              <Navigation className="w-3.5 h-3.5" /> Reroute
-                            </button>
-                          )}
+                          <button
+                            onClick={() => setRerouteId(shipment.id)}
+                            className="bg-purple-600 hover:bg-purple-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 shadow-lg shadow-purple-500/20 transition-all hover:scale-105 active:scale-95 uppercase tracking-wider cursor-pointer"
+                          >
+                            <Navigation className="w-3.5 h-3.5" /> Reroute
+                          </button>
                           <button
                             onClick={() => setEditShipment(shipment)}
                             title="Edit shipment"
