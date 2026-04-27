@@ -156,6 +156,113 @@ def _default_response(reason: str) -> dict:
     }
 
 
+# ── Road disturbance score (historical factor) ─────────────────────────────────
+
+async def get_road_disturbance_score(
+    road_names: list[str],
+    planned_date: str,          # "YYYY-MM-DD"
+    risk_level: str = "low",    # used only to pick cache TTL
+) -> dict:
+    """
+    Search for disturbances on specific highway numbers near a planned date.
+    Returns {"score": float 0-100, "reason": str}
+    Score guide: 0=clear, 20=minor works, 40=moderate, 60=significant, 80+=blocked
+    Falls back to {"score": 0, "reason": "unavailable"} on any error.
+    """
+    if not GEMINI_API_KEY:
+        logger.error("GEMINI_API_KEY not set in .env")
+        return {"score": 0, "reason": "unavailable"}
+
+    if not road_names:
+        return {"score": 0, "reason": "No road names available"}
+
+    from services.cache import road_disturbance_cache
+    import re as _re
+
+    ttl       = 600 if risk_level in ("high", "critical") else 1800
+    cache_key = f"road_dist:{'|'.join(sorted(road_names))}:{planned_date}"
+
+    cached = road_disturbance_cache.get(cache_key)
+    if cached is not None:
+        logger.debug(f"Road disturbance cache hit for {cache_key}")
+        return cached
+
+    roads_str = ", ".join(road_names)
+    prompt = f"""You are a road intelligence analyst for Indian logistics.
+
+Search for disturbances on these specific highways on or near {planned_date}:
+Roads: {roads_str}
+
+Look for:
+- Road closures or construction blocks on these highway numbers
+- Flooding or landslides affecting these corridors
+- Protests, bandh, or strikes specifically on these roads
+- Major accident-based closures reported in news
+
+Respond ONLY with this exact JSON, nothing else:
+{{
+  "score": <0-100, 0=no issues, 20=minor works, 40=moderate disruption, 60=significant, 80=major blockage>,
+  "reason": "<one concise sentence, or 'No road disturbances found' if clear>"
+}}"""
+
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "tools": [{"google_search": {}}],
+        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 256},
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                GEMINI_URL,
+                params={"key": GEMINI_API_KEY},
+                json=payload,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        text = (
+            data.get("candidates", [{}])[0]
+                .get("content", {})
+                .get("parts", [{}])[0]
+                .get("text", "")
+        )
+
+        if not text:
+            logger.warning("Gemini road disturbance: empty response")
+            return {"score": 0, "reason": "unavailable"}
+
+        text = text.strip()
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        text = text.strip()
+        text = _re.sub(r':\s*"([^"]*)\n([^"]*)"', lambda m: ': "' + m.group(1).strip() + ' ' + m.group(2).strip() + '"', text)
+
+        result = json.loads(text)
+        result.setdefault("score", 0)
+        result.setdefault("reason", "No road disturbances found")
+        result["score"] = float(max(0, min(100, result["score"])))
+
+        logger.info(f"Road disturbance: score={result['score']} | {result['reason'][:80]}")
+        road_disturbance_cache.set(cache_key, result, ttl=ttl)
+        return result
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Road disturbance JSON parse error: {e} | text: {text[:200]}")
+        return {"score": 0, "reason": "unavailable"}
+    except httpx.TimeoutException:
+        logger.error("Road disturbance Gemini request timed out")
+        return {"score": 0, "reason": "unavailable"}
+    except httpx.HTTPError as e:
+        logger.error(f"Road disturbance Gemini HTTP error: {e}")
+        return {"score": 0, "reason": "unavailable"}
+    except Exception as e:
+        logger.error(f"Road disturbance unexpected error: {e}")
+        return {"score": 0, "reason": "unavailable"}
+
+
 # ── Self test ──────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -184,3 +291,16 @@ if __name__ == "__main__":
             print(f"  Impact   : {event.get('impact')}")
 
     asyncio.run(test())
+
+    async def test_road_disturbance():
+        from datetime import date
+        print("\n\nTesting road disturbance score...")
+        result = await get_road_disturbance_score(
+            road_names=["NH48", "NH8"],
+            planned_date=date.today().isoformat(),
+            risk_level="low",
+        )
+        print(f"Score  : {result['score']}/100")
+        print(f"Reason : {result['reason']}")
+
+    asyncio.run(test_road_disturbance())

@@ -11,6 +11,7 @@ from typing import Optional
 
 from services.weather_service import score_weather_along_route
 from services.mappls_service import get_route
+from services.gemini_service import get_road_disturbance_score
 
 logger = logging.getLogger(__name__)
 
@@ -222,8 +223,13 @@ def _compute_time_buffer_score(created_at: datetime, eta_seconds: Optional[int])
 
 # historycal data, pathetical value but still has some wetightage , i like it tbh
 
-def _compute_historical_score() -> dict:
-    return {"score": 0, "reason": "No historical data", "weight": WEIGHTS["historical"]}
+async def _compute_historical_score(
+    road_names: list[str],
+    planned_date: str,
+    risk_level: str,
+) -> dict:
+    result = await get_road_disturbance_score(road_names, planned_date, risk_level)
+    return {"score": result["score"], "reason": result["reason"], "weight": WEIGHTS["historical"]}
 
 
 #main masalaa , with protin tube with white soas
@@ -240,18 +246,21 @@ async def calculate_risk(shipment: dict) -> dict:
         created_at = datetime.fromisoformat(created_at)
 
     stored_incidents = shipment.get("route_incidents", [])
+    road_names       = shipment.get("road_names", [])
+    planned_date     = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    prev_risk_lvl    = (shipment.get("risk") or {}).get("current", {}).get("risk_level", "low")
 
     logger.info(f"Calculating risk for shipment with {len(waypoints)} waypoints, {len(stored_incidents)} stored incidents")
 
     import asyncio
-    weather_data, traffic_data = await asyncio.gather(
+    weather_data, traffic_data, historical_data = await asyncio.gather(
         _compute_weather_score(waypoints, current_location, origin_coords, eta_seconds, distance_km),
         _compute_traffic_score(current_location, dest_coords),
+        _compute_historical_score(road_names, planned_date, prev_risk_lvl),
     )
     event_data = _compute_event_score(stored_incidents)
 
     time_buffer_data = _compute_time_buffer_score(created_at, eta_seconds)
-    historical_data  = _compute_historical_score()
 
     # Apply simulation overrides if present
     simulated_scenario = shipment.get("_simulated_scenario")

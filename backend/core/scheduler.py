@@ -251,7 +251,33 @@ async def _process_shipment(shipment: dict):
     except Exception as e:
         logger.warning(f"Incident refresh task failed to start for {shipment_id}: {e}")
 
-    # STEP 9 — Broadcast alert if risk changed OR auto rerouted
+    # STEP 9b — Road disturbance notification (Gemini historical factor)
+    prev_hist_score = (
+        (shipment.get("last_risk_assessment") or {})
+        .get("breakdown", {})
+        .get("historical", {})
+        .get("score", 0)
+    )
+    new_hist_score  = breakdown.get("historical", {}).get("score", 0)
+    hist_reason     = breakdown.get("historical", {}).get("reason", "")
+
+    if (new_hist_score >= 40 and prev_hist_score < 40
+            and "unavailable" not in hist_reason
+            and "No road" not in hist_reason):
+        road_alert = create_risk_alert(
+            shipment_id=shipment_id,
+            shipment_name=shipment_name,
+            level=new_level.lower(),
+            message=f"Road disturbance detected: {hist_reason}",
+            score=new_hist_score,
+            primary_driver="historical",
+            source="REAL_SYSTEM",
+            previous_level=prev_level,
+        )
+        await manager.broadcast(road_alert)
+        logger.info(f"Road disturbance alert: {shipment_name} | score={new_hist_score} | {hist_reason[:60]}")
+
+    # STEP 10 — Broadcast alert if risk changed OR auto rerouted
     if risk_changed or auto_rerouted:
         # Build message using strict event factory
         alert_message = f"Auto-rerouted due to {new_level} risk — {reason}" if (auto_rerouted and reroute_data) else reason

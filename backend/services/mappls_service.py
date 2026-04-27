@@ -6,6 +6,7 @@
 import httpx
 import math
 import os
+import re
 import logging
 from dotenv import load_dotenv
 load_dotenv()
@@ -215,14 +216,17 @@ async def get_route(
 
     traffic_ratio    = round(duration_with / duration_no_traffic, 3) if duration_no_traffic > 0 else 1.0
 
-    # Extract road names from steps (NH48, SH17 etc)
+    # Extract highway codes from steps — NH48, SH17, MDR3 only (no freetext names)
+    _HIGHWAY_RE = re.compile(r'\b(NH|SH|MDR)\s*(\d+[A-Z]?)\b')
     steps = legs[0].get("steps", []) if legs else []
-    road_names = list(dict.fromkeys([
-        step.get("name", "").strip()
-        for step in steps
-        if step.get("name", "").strip()
-        and any(x in step.get("name", "") for x in ["NH", "SH", "MDR", "Highway", "Expressway", ])
-    ]))
+    seen_codes: set[str] = set()
+    road_names: list[str] = []
+    for step in steps:
+        for m in _HIGHWAY_RE.finditer(step.get("name", "")):
+            code = f"{m.group(1)}{m.group(2)}"   # e.g. "NH48", "SH17"
+            if code not in seen_codes:
+                road_names.append(code)
+                seen_codes.add(code)
 
     # Decode geometry to get waypoints
     coordinates = _decode_polyline(primary.get("geometry", ""))
