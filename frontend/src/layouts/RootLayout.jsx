@@ -11,7 +11,6 @@ import { useShipments } from '../hooks/useShipments';
 import { useShipmentStore } from '../stores/shipmentStore';
 import ShipmentDetailPanel from '../components/ui/ShipmentDetailPanel';
 import DecisionPanel from '../components/ui/DecisionPanel';
-import { useState } from 'react';
 /**
  * Root layout — sidebar + header + animated page content.
  * Content area shifts based on sidebar collapsed state.
@@ -22,8 +21,7 @@ const RootLayout = memo(function RootLayout() {
   // Initiate Global WebSockets
   useAlertWebSocket();
 
-  const { inspectingShipmentId, setInspectingShipmentId } = useUIStore();
-  const [rerouteId, setRerouteId] = useState(null);
+  const { inspectingShipmentId, setInspectingShipmentId, rerouteId, setRerouteId } = useUIStore();
 
   // GLOBAL SYNC: React Query Server State -> Zustand Local State
   const { data: activeShipments } = useShipments();
@@ -68,7 +66,7 @@ const RootLayout = memo(function RootLayout() {
           onReroute={(id) => setRerouteId(id)}
         />
       )}
-      <DecisionPanel shipmentId={rerouteId} onClose={() => setRerouteId(null)} />
+      {rerouteId && <DecisionPanel shipmentId={rerouteId} onClose={() => setRerouteId(null)} />}
     </div>
   );
 });

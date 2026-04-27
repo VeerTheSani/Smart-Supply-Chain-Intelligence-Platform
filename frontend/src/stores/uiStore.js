@@ -24,4 +24,7 @@ export const useUIStore = create((set) => ({
 
   inspectingShipmentId: null,
   setInspectingShipmentId: (id) => set({ inspectingShipmentId: id }),
+
+  rerouteId: null,
+  setRerouteId: (id) => set({ rerouteId: id }),
 }));

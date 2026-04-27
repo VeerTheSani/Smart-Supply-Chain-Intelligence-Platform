@@ -1,16 +1,32 @@
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Map, X, Clock, ShieldAlert, ArrowRight, Activity, ActivitySquare } from 'lucide-react';
+import { Map, X, Clock, ShieldAlert, ArrowRight, Activity, ActivitySquare, Loader2 } from 'lucide-react';
 import { useRerouting } from '../../hooks/useShipments';
+import { useQueryClient } from '@tanstack/react-query';
+import apiClient from '../../api/apiClient';
 import LoadingSpinner from './LoadingSpinner';
 import ErrorFallback from './ErrorFallback';
+import toast from 'react-hot-toast';
 
 const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
   const { data, isLoading, error } = useRerouting(shipmentId);
+  const queryClient = useQueryClient();
+  const [engagingRoute, setEngagingRoute] = useState(null);
 
-  const handleEngage = (routeId) => {
-    alert(`[SYSTEM COMMAND] Reroute sequence initialized.\n\nSuccessfully engaged alternative algorithm path: Route ${routeId} for Shipment ${shipmentId.slice(-6)}.`);
-    onClose();
+  const handleEngage = async (routeId) => {
+    setEngagingRoute(routeId);
+    try {
+      await apiClient.post(`/api/reroute/${shipmentId}/execute`, { route_id: routeId });
+      toast.success(`Route ${routeId} engaged successfully`);
+      queryClient.invalidateQueries({ queryKey: ['shipments'] });
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      onClose();
+    } catch (err) {
+      const msg = err.response?.data?.detail || 'Reroute execution failed';
+      toast.error(msg);
+    } finally {
+      setEngagingRoute(null);
+    }
   };
 
   return (
@@ -33,7 +49,7 @@ const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
                   <p className="text-sm text-theme-secondary font-medium">Shipment ID: <span className="font-mono text-theme-primary">{shipmentId.slice(-8)}</span></p>
                 </div>
               </div>
-              <button onClick={onClose} className="p-2 text-theme-secondary hover:text-theme-primary transition-colors rounded-xl hover:bg-theme-tertiary cursor-pointer">
+              <button onClick={onClose} disabled={!!engagingRoute} className="p-2 text-theme-secondary hover:text-theme-primary transition-colors rounded-xl hover:bg-theme-tertiary cursor-pointer disabled:opacity-50">
                 <X className="w-6 h-6" />
               </button>
             </div>
@@ -65,6 +81,7 @@ const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
                     {data.alternatives.map((alt, i) => {
                       const isRecommended = data.recommended_route === alt.route_id;
                       const timeSaved = data.current_route.eta - alt.eta;
+                      const isEngaging = engagingRoute === alt.route_id;
                       
                       const tradeoff = alt.type.includes("Fast") ? "Optimizes for Speed over Safety" : 
                                        alt.type.includes("Safe") ? "Optimizes for Safety over Speed" : 
@@ -118,9 +135,12 @@ const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
                             
                             <button 
                               onClick={() => handleEngage(alt.route_id)}
-                              className={`w-full py-3 rounded-xl text-sm font-bold tracking-wide transition-all uppercase cursor-pointer ${isRecommended ? 'bg-accent text-white hover:bg-accent/80 shadow-md' : 'bg-theme-tertiary text-theme-secondary hover:bg-theme-tertiary/70 hover:text-theme-primary'}`}
+                              disabled={!!engagingRoute}
+                              className={`w-full py-3 rounded-xl text-sm font-bold tracking-wide transition-all uppercase cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${isRecommended ? 'bg-accent text-white hover:bg-accent/80 shadow-md' : 'bg-theme-tertiary text-theme-secondary hover:bg-theme-tertiary/70 hover:text-theme-primary'}`}
                             >
-                              Engage Path
+                              {isEngaging ? (
+                                <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Engaging...</span>
+                              ) : 'Engage Path'}
                             </button>
                           </div>
                         </motion.div>

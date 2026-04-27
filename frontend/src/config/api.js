@@ -43,6 +43,14 @@ export const ENDPOINTS = {
   COUNTDOWNS: '/api/countdowns',
   COUNTDOWN_CANCEL: (id) => `/api/countdown/${id}/cancel`,
 
+  // Decisions
+  DECISIONS: '/api/decisions',
+  DECISION_BY_ID: (id) => `/api/decisions/${id}`,
+
+  // Reroute
+  REROUTE_BY_SHIPMENT: (id) => `/api/reroute/${id}`,
+  REROUTE_EXECUTE: (id) => `/api/reroute/${id}/execute`,
+
   // Analytics
   ANALYTICS_OVERVIEW: '/api/analytics/overview',
   ANALYTICS_TRENDS: '/api/analytics/trends',

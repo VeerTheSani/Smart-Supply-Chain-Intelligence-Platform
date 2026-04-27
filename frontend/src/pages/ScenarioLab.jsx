@@ -11,7 +11,8 @@ import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline, Circle } from
 import { useTheme } from '../context/ThemeContext';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { BASE_URL } from '../config/api';
+import apiClient from '../api/apiClient';
+import toast from 'react-hot-toast';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -139,6 +140,7 @@ const ScenarioLab = memo(function ScenarioLab() {
   const [severity, setSeverity]     = useState('medium');
   const [loading, setLoading]       = useState(false);
   const [result, setResult]         = useState(null);
+  const [error, setError]           = useState(null);
   const [mapKey, setMapKey]         = useState(0);
 
   // Countdown
@@ -172,38 +174,50 @@ const ScenarioLab = memo(function ScenarioLab() {
 
   const handleRun = async () => {
     if (!shipmentId) return;
-    setLoading(true); setResult(null); setCountdown(0); setDecided(false);
+    setLoading(true); setResult(null); setError(null); setCountdown(0); setDecided(false);
     setSimId(null); setCountdownActive(false); setExecStatus(null);
     try {
-      const res = await fetch(`${BASE_URL}/api/scenario/run`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shipment_id: shipmentId, scenario, severity }),
+      const { data } = await apiClient.post('/api/scenario/run', {
+        shipment_id: shipmentId, scenario, severity,
       });
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
       setResult(data); setSimId(data.simulation_id);
       if (data.decision?.action === 'reroute' && data.decision?.countdown > 0) {
         setCountdown(data.decision.countdown); setCountdownActive(true);
       }
       setMapKey(k => k + 1);
-    } catch (e) { console.error('Simulation failed:', e); }
-    finally { setLoading(false); }
+      toast.success('Simulation complete');
+    } catch (e) {
+      const msg = e.response?.data?.detail || e.message || 'Simulation failed';
+      setError(msg);
+      toast.error(msg);
+      console.error('Simulation failed:', e);
+    } finally { setLoading(false); }
   };
 
   const handleAccept = useCallback(async () => {
     if (!simId || decided) return;
     setDecided(true); setCountdownActive(false); setExecStatus('accepted');
     clearInterval(timerRef.current);
-    try { await fetch(`${BASE_URL}/api/scenario/accept`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ simulation_id: simId }) }); }
-    catch (e) { console.error(e); }
+    try {
+      await apiClient.post('/api/scenario/accept', { simulation_id: simId });
+      toast.success('Route optimized — applied');
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Accept failed');
+      console.error(e);
+    }
   }, [simId, decided]);
 
   const handleCancel = useCallback(async () => {
     if (!simId || decided) return;
     setDecided(true); setCountdown(0); setCountdownActive(false); setExecStatus('cancelled');
     clearInterval(timerRef.current);
-    try { await fetch(`${BASE_URL}/api/scenario/cancel`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ simulation_id: simId }) }); }
-    catch (e) { console.error(e); }
+    try {
+      await apiClient.post('/api/scenario/cancel', { simulation_id: simId });
+      toast.success('Countdown cancelled');
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Cancel failed');
+      console.error(e);
+    }
   }, [simId, decided]);
 
   /* ── Derived ───────────────────────────────────────────────── */

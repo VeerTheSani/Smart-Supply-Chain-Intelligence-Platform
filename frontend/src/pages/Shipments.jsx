@@ -7,9 +7,8 @@ import { useUIStore } from '../stores/uiStore';
 import { useCountdownStore } from '../stores/countdownStore';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import ErrorFallback from '../components/ui/ErrorFallback';
-import DecisionPanel from '../components/ui/DecisionPanel';
-import ShipmentDetailPanel from '../components/ui/ShipmentDetailPanel';
 import CountdownBar from '../components/ui/CountdownBar';
+import ShipmentDetailPanel from '../components/ui/ShipmentDetailPanel';
 import { cn } from '../lib/utils';
 
 const Shipments = memo(function Shipments() {
@@ -17,8 +16,7 @@ const Shipments = memo(function Shipments() {
   const shipments = useShipmentStore(state => state.shipments);
   const countdowns = useCountdownStore(state => state.countdowns);
   
-  const { inspectingShipmentId, setInspectingShipmentId } = useUIStore();
-  const [rerouteId, setRerouteId] = useState(null);
+  const { inspectingShipmentId, setInspectingShipmentId, setRerouteId } = useUIStore();
   const [filterText, setFilterText] = useState('');
 
   const inspectShipment = shipments.find(s => s.id === inspectingShipmentId);
@@ -184,7 +182,7 @@ const Shipments = memo(function Shipments() {
                           >
                             <Eye className="w-3.5 h-3.5" /> Intel
                           </button>
-                          {(isWarning || isCritical) && (
+                          {shipment.status !== 'delivered' && (isWarning || isCritical || hasCountdown) && (
                             <button
                               onClick={() => setRerouteId(shipment.id)}
                               className="bg-accent hover:bg-accent/90 text-white px-5 py-2 rounded-xl text-xs font-bold inline-flex items-center gap-2 shadow-lg shadow-accent/20 transition-all duration-300 hover:scale-105 active:scale-95 uppercase tracking-wider whitespace-nowrap cursor-pointer group"

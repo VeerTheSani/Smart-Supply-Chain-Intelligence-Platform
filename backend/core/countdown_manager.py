@@ -6,11 +6,14 @@
 
 import asyncio
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 from database import db
 
 logger = logging.getLogger(__name__)
+
+from core.metrics import metrics
 
 COUNTDOWN_SECONDS = 120
 
@@ -29,14 +32,16 @@ class CountdownManager:
         """
         # Broadcast countdown_started
         from core.websocket_manager import manager
+        now = datetime.now(timezone.utc)
         await manager.broadcast({
             "type": "countdown_started",
-            "event_id": f"cd_start_{decision_id or shipment_id}",
+            "event_id": f"cd_start_{decision_id or shipment_id}_{uuid.uuid4().hex[:8]}",
             "shipment_id": shipment_id,
             "shipment_name": shipment_name,
             "decision_id": decision_id,
             "seconds_remaining": seconds,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": now.isoformat(),
+            "version":   now.isoformat(),
         })
 
         await db.notifications.insert_one({
@@ -48,18 +53,26 @@ class CountdownManager:
             "impact": f"Reroute will execute in {seconds} seconds if not cancelled.",
             "severity": "high",
             "read": False,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": now.isoformat()
         })
 
-        logger.info(f"Countdown started for {shipment_id} ({seconds}s). Managed by DB loop.")
+        await metrics.increment("total_countdowns_started")
+        logger.info(
+            f"[COUNTDOWN_STARTED] shipment={shipment_id} "
+            f"decision={decision_id} seconds={seconds}"
+        )
 
     async def broadcast_update(self, shipment_id: str, shipment_name: str, seconds_remaining: int):
         from core.websocket_manager import manager
+        now = datetime.now(timezone.utc)
         await manager.broadcast({
             "type": "countdown_update",
+            "event_id": str(uuid.uuid4()),
             "shipment_id": shipment_id,
             "shipment_name": shipment_name,
             "seconds_remaining": seconds_remaining,
+            "timestamp": now.isoformat(),
+            "version":   now.isoformat(),
         })
 
     async def cancel_countdown(self, shipment_id: str) -> bool:
@@ -67,25 +80,30 @@ class CountdownManager:
         Broadcast cancellation. Actual state is managed in DB.
         """
         from core.websocket_manager import manager
+        now = datetime.now(timezone.utc)
         await manager.broadcast({
             "type": "countdown_cancelled",
-            "event_id": f"cd_cancel_{shipment_id}_{int(datetime.now().timestamp())}",
+            "event_id": f"cd_cancel_{shipment_id}_{uuid.uuid4().hex[:8]}",
             "shipment_id": shipment_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": now.isoformat(),
+            "version":   now.isoformat(),
         })
 
-        logger.info(f"Countdown cancelled broadcast for {shipment_id}")
+        await metrics.increment("total_countdowns_cancelled")
+        logger.info(f"[COUNTDOWN_CANCELLED] shipment={shipment_id}")
         return True
 
     async def execute_reroute_result(self, shipment_id: str, shipment_name: str, reroute_data: Optional[dict], success: bool):
         from core.websocket_manager import manager
+        now = datetime.now(timezone.utc)
         await manager.broadcast({
             "type": "reroute_executed",
-            "event_id": f"rr_exec_{shipment_id}_{int(datetime.now().timestamp())}",
+            "event_id": f"rr_exec_{shipment_id}_{uuid.uuid4().hex[:8]}",
             "shipment_id": shipment_id,
             "shipment_name": shipment_name,
             "success": success,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": now.isoformat(),
+            "version":   now.isoformat(),
         })
 
         if success:
@@ -103,7 +121,11 @@ class CountdownManager:
             message = f"Auto-reroute failed for {shipment_name}."
             severity = "high"
 
-        logger.info(f"Auto-reroute execution broadcast for {shipment_id} (Success: {success})")
+        await metrics.increment("total_countdowns_completed")
+        logger.info(
+            f"[REROUTE_RESULT] shipment={shipment_id} "
+            f"success={success}"
+        )
         await db.notifications.insert_one({
             "type": "reroute_executed",
             "shipment_id": shipment_id,

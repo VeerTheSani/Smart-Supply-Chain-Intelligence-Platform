@@ -98,6 +98,12 @@ async def create_shipment(data: ShipmentCreate):
     3. Reverse geocode waypoints → city names (for Gemini)
     4. Store in MongoDB
     """
+    # Input sanitization — reject suspicious characters beyond Pydantic length checks
+    from main import validate_string
+    validate_string(data.shipment_name, "shipment_name")
+    validate_string(data.origin_name, "origin_name")
+    validate_string(data.destination_name, "destination_name")
+
     try:
         origin_geo = await geocode(data.origin_name)
         dest_geo   = await geocode(data.destination_name)

@@ -9,6 +9,7 @@
 import asyncio
 import logging
 import math
+import uuid
 from datetime import datetime, timezone, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -16,6 +17,7 @@ from bson import ObjectId
 
 from database import db
 from core.websocket_manager import manager
+from core.metrics import metrics
 
 logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
@@ -62,21 +64,24 @@ async def _advance_location(shipment: dict) -> dict | None:
 
     if progress >= 1.0:
         if shipment.get("status") != "delivered":
+            sid = str(shipment["_id"])
             # Mark shipment as delivered when journey is complete
             await db.shipments.update_one(
                 {"_id": shipment["_id"]},
                 {"$set": {"status": "delivered", "updated_at": now}}
             )
             shipment["status"] = "delivered"
+            await metrics.increment("shipments_delivered")
+            logger.info(f"[DELIVERY] shipment={sid} status=delivered")
             
             # Cancel any pending decisions
             updated_decisions = await db.decisions.update_many(
-                {"shipment_id": str(shipment["_id"]), "status": "pending"},
+                {"shipment_id": sid, "status": "pending"},
                 {"$set": {"status": "cancelled", "updated_at": now}}
             )
             if updated_decisions.modified_count > 0:
                 from core.countdown_manager import countdown_manager
-                await countdown_manager.cancel_countdown(str(shipment["_id"]))
+                await countdown_manager.cancel_countdown(sid)
 
         return waypoints[-1]
 
@@ -143,8 +148,9 @@ async def _apply_auto_reroute(shipment: dict) -> dict | None:
 
         now = datetime.now(timezone.utc)
 
-        await db.shipments.update_one(
-            {"_id": shipment["_id"]},
+        # Version guard: only reroute if shipment hasn't been modified since we read it
+        reroute_result = await db.shipments.update_one(
+            {"_id": shipment["_id"], "status": {"$nin": ["delivered"]}},
             {"$set": {
                 "route_waypoints":         new_waypoints,
                 "named_waypoints":         named,
@@ -155,6 +161,9 @@ async def _apply_auto_reroute(shipment: dict) -> dict | None:
                 "updated_at":              now,
             }}
         )
+        if reroute_result.matched_count == 0:
+            logger.warning(f"Reroute skipped for {shipment['_id']} — status changed")
+            return None
 
         logger.info(
             f"Auto-rerouted shipment {shipment['_id']} "
@@ -178,7 +187,7 @@ async def _process_shipment(shipment: dict):
     shipment_name = shipment.get("shipment_name", shipment.get("origin_name", "Unknown"))
     
     # Prevent duplicate reroutes or processing of delivered shipments
-    if shipment.get("status") in ["rerouted", "delivered"]:
+    if shipment.get("status") in ["delivered"]:
         return
         
     now           = datetime.now(timezone.utc)
@@ -199,13 +208,14 @@ async def _process_shipment(shipment: dict):
 
     use_gemini = _should_call_gemini(shipment, prev_level)
 
-    # Temporarily patch shipment to skip Gemini if TTL not reached
+    # Create a copy to avoid mutating the shared dict
+    risk_input = {**shipment}
     if not use_gemini:
-        shipment["_skip_gemini"] = True
+        risk_input["_skip_gemini"] = True
 
     # STEP 3 — Calculate fresh risk
     try:
-        assessment = await calculate_risk(shipment)
+        assessment = await calculate_risk(risk_input)
     except Exception as e:
         logger.error(f"Risk calculation failed for {shipment_id}: {e}")
         return
@@ -220,8 +230,6 @@ async def _process_shipment(shipment: dict):
     risk_changed = prev_level != new_level
 
     # STEP 5 — Start countdown if HIGH/CRITICAL (instead of immediate reroute)
-    auto_rerouted    = False
-    reroute_data     = None
 
     if new_level in ["HIGH", "CRITICAL"] and shipment.get("auto_reroute_enabled"):
         from core.countdown_manager import countdown_manager
@@ -245,6 +253,7 @@ async def _process_shipment(shipment: dict):
                         "shipment_id": shipment_id,
                         "type": "auto_reroute",
                         "status": "pending",
+                        "executed": False,
                         "risk_snapshot": {
                             "score": new_score,
                             "level": new_level,
@@ -307,72 +316,104 @@ async def _process_shipment(shipment: dict):
         "computed_at": assessment["computed_at"].isoformat()
     }
 
-    # STEP 7 — Build MongoDB update
-    mongo_update = {
-        "$set": {
-            "last_risk_assessment": assessment_to_store,
-            "updated_at":           now,
-        },
-        "$push": {
-            "risk_history": assessment_to_store
+    # STEP 7+8 — Build and save with optimistic lock retry + backoff
+    # Field-level isolation: recompute job writes ONLY risk fields, not location
+    db_write_success = False
+    write_now = None
+    for attempt in range(3):  # attempt 0, 1, 2
+        if attempt > 0:
+            await asyncio.sleep(0.01 * (attempt + 1))  # Backoff: 20ms, 30ms
+
+        write_now = datetime.now(timezone.utc)
+
+        mongo_update = {
+            "$set": {
+                "last_risk_assessment": assessment_to_store,
+                "updated_at":           write_now,
+            },
+            "$push": {
+                "risk_history": {
+                    "$each": [assessment_to_store],
+                    "$slice": -50,
+                }
+            }
         }
-    }
 
-    if new_location:
-        mongo_update["$set"]["current_location"] = new_location
+        # Risk job does NOT write current_location — GPS job owns that field
+        if use_gemini:
+            mongo_update["$set"]["last_gemini_check"] = write_now.isoformat()
 
-    if use_gemini:
-        mongo_update["$set"]["last_gemini_check"] = now.isoformat()
+        try:
+            query = {"_id": shipment["_id"]}
+            if "updated_at" in shipment:
+                query["updated_at"] = shipment["updated_at"]
 
-    # STEP 8 — Save to MongoDB
-    try:
-        query = {"_id": shipment["_id"]}
-        if "updated_at" in shipment:
-            query["updated_at"] = shipment["updated_at"]
+            update_result = await db.shipments.update_one(query, mongo_update)
 
-        update_result = await db.shipments.update_one(
-            query,
-            mongo_update
-        )
-        if update_result.matched_count == 0:
-            logger.warning(f"Optimistic lock failure for shipment {shipment_id} - concurrent update detected.")
+            if update_result.matched_count == 0:
+                if attempt < 2:
+                    await metrics.increment("total_retries")
+                    logger.info(
+                        f"[OPTIMISTIC_LOCK_RETRY] shipment={shipment_id} "
+                        f"attempt={attempt + 1}/2"
+                    )
+                    fresh = await db.shipments.find_one({"_id": shipment["_id"]})
+                    if not fresh:
+                        logger.warning(f"Shipment {shipment_id} vanished during retry")
+                        return
+                    # Check if shipment was delivered while we were computing
+                    if fresh.get("status") == "delivered":
+                        logger.info(f"Shipment {shipment_id} delivered during retry, aborting")
+                        return
+                    shipment["updated_at"] = fresh.get("updated_at")
+                    continue
+                else:
+                    await metrics.increment("total_lock_failures")
+                    logger.warning(
+                        f"[OPTIMISTIC_LOCK_FAILURE] shipment={shipment_id} "
+                        f"attempts_exhausted=2"
+                    )
+                    return
+            else:
+                db_write_success = True
+                break
+        except Exception as e:
+            logger.error(f"MongoDB update failed for {shipment_id}: {e}")
             return
-    except Exception as e:
-        logger.error(f"MongoDB update failed for {shipment_id}: {e}")
+
+    if not db_write_success:
         return
 
-    # STEP 9 — Broadcast alert if risk changed OR auto rerouted
-    if risk_changed or auto_rerouted:
-        if auto_rerouted and reroute_data:
-            alert_message = f"Auto-rerouted due to {new_level} risk — {reason}"
-        else:
-            alert_message = reason
+    # STEP 9 — Side-effects ONLY after successful DB write
+    if risk_changed:
+        alert_message = reason
 
         alert = {
-            # Frontend listens for exactly "risk_alert"
             "type":           "risk_alert",
+            "event_id":       str(uuid.uuid4()),
             "shipment_id":    shipment_id,
             "shipment_name":  shipment_name,
-            # level must be lowercase ("high" not "HIGH")
             "level":          new_level.lower(),
             "message":        alert_message,
             "previous_level": prev_level.lower() if prev_level else "unknown",
             "score":          new_score,
             "primary_driver": driver,
-            "auto_rerouted":  auto_rerouted,
-            "timestamp":      now.isoformat(),
+            "timestamp":      write_now.isoformat(),
+            "version":        write_now.isoformat(),
         }
 
         await manager.broadcast(alert)
+        await metrics.increment("risk_alerts_sent")
         logger.info(
-            f"Alert broadcast: {shipment_name} "
-            f"{prev_level} → {new_level} | {reason[:60]}"
+            f"[RISK_ALERT] shipment={shipment_id} "
+            f"prev={prev_level} new={new_level} "
+            f"score={new_score} driver={driver}"
         )
 
-        # Save alert to shipment's alerts_triggered
+        # Save alert to shipment's alerts_triggered (capped at 50)
         await db.shipments.update_one(
             {"_id": shipment["_id"]},
-            {"$push": {"alerts_triggered": alert}}
+            {"$push": {"alerts_triggered": {"$each": [alert], "$slice": -50}}}
         )
 
         # Save to global notifications collection
@@ -469,28 +510,48 @@ async def check_pending_decisions():
             shipment = await db.shipments.find_one({"_id": ObjectId(shipment_id)})
             if not shipment:
                 continue
+
+            # Skip countdowns for delivered shipments — cancel stale decision
+            if shipment.get("status") in ("delivered",):
+                await db.decisions.update_one(
+                    {"_id": decision["_id"], "status": "pending"},
+                    {"$set": {"status": "cancelled", "updated_at": now}}
+                )
+                continue
                 
             shipment_name = shipment.get("shipment_name", shipment.get("origin_name", "Unknown"))
                 
             if remaining <= 0:
                 # Execute reroute
-                logger.info(f"Decision {decision_id} expired. Executing auto-reroute for {shipment_id}")
+                logger.info(
+                    f"[REROUTE_TRIGGERED] shipment={shipment_id} "
+                    f"decision={decision_id} status=expired"
+                )
                 
-                # Atomically update status to prevent duplicate execution
+                # Global idempotency: atomic status + executed guard
                 updated = await db.decisions.update_one(
-                    {"_id": decision["_id"], "status": "pending"},
-                    {"$set": {"status": "executed", "executed_at": now}}
+                    {"_id": decision["_id"], "status": "pending", "executed": {"$ne": True}},
+                    {"$set": {"status": "executed", "executed": True, "executed_at": now}}
                 )
                 if updated.modified_count == 0:
-                    continue # Someone else executed or cancelled it
+                    continue  # Another worker already executed or cancelled
                     
-                # Execute
+                # Side-effects ONLY after atomic DB guard succeeds
                 reroute_data = await _apply_auto_reroute(shipment)
                 
                 if reroute_data:
+                    await metrics.increment("total_reroutes")
+                    logger.info(
+                        f"[REROUTE_EXECUTED] shipment={shipment_id} "
+                        f"decision={decision_id} success=true"
+                    )
                     await countdown_manager.execute_reroute_result(shipment_id, shipment_name, reroute_data, success=True)
                 else:
-                    logger.warning(f"Auto-reroute failed for {shipment_id}")
+                    await metrics.increment("total_reroute_failures")
+                    logger.warning(
+                        f"[REROUTE_EXECUTED] shipment={shipment_id} "
+                        f"decision={decision_id} success=false"
+                    )
                     await countdown_manager.execute_reroute_result(shipment_id, shipment_name, None, success=False)
             else:
                 # Broadcast update
@@ -503,16 +564,22 @@ async def check_pending_decisions():
 async def update_gps_positions():
     """
     Fast loop (3s) to simulate real-time GPS tracking.
-    Updates position in DB and emits position_update WebSocket event.
+    Field-level isolation: writes ONLY current_location and last_position_at.
+    Status guard: skips delivered shipments.
     """
     try:
+        # Status guard: GPS job ONLY processes actively moving shipments
         active = await db.shipments.find({
-            "status": {"$in": ["in_transit", "rerouting"]}
+            "status": {"$in": ["in_transit"]}
         }).to_list(None)
 
         for shipment in active:
             new_location = await _advance_location(shipment)
             if not new_location:
+                continue
+
+            # If _advance_location just delivered, skip GPS write
+            if shipment.get("status") == "delivered":
                 continue
 
             shipment_id = str(shipment["_id"])
@@ -523,17 +590,28 @@ async def update_gps_positions():
                 old_location.get("lng") == new_location["lng"]):
                 continue
 
-            await db.shipments.update_one(
-                {"_id": shipment["_id"]},
-                {"$set": {"current_location": new_location}}
+            gps_now = datetime.now(timezone.utc)
+            # Field-level isolation: GPS writes ONLY location fields
+            gps_result = await db.shipments.update_one(
+                {"_id": shipment["_id"], "status": {"$nin": ["delivered"]}},
+                {"$set": {
+                    "current_location": new_location,
+                    "last_position_at": gps_now,
+                }}
             )
 
-            await manager.broadcast({
-                "type": "position_update",
-                "shipment_id": shipment_id,
-                "lat": new_location["lat"],
-                "lng": new_location["lng"]
-            })
+            # Only broadcast if DB write succeeded (shipment still active)
+            if gps_result.matched_count > 0:
+                await manager.broadcast({
+                    "type": "position_update",
+                    "event_id": str(uuid.uuid4()),
+                    "shipment_id": shipment_id,
+                    "lat": new_location["lat"],
+                    "lng": new_location["lng"],
+                    "timestamp": gps_now.isoformat(),
+                    "version":   gps_now.isoformat(),
+                })
+                await metrics.increment("gps_updates_sent")
 
     except Exception as e:
         logger.error(f"Error updating GPS positions: {e}")
@@ -566,6 +644,23 @@ def start_scheduler():
         trigger="interval",
         seconds=3,
         id="update_gps_positions",
+        max_instances=1,
+        replace_existing=True,
+    )
+
+    # Periodic cache cleanup
+    async def _cleanup_caches():
+        try:
+            from services.cache import cleanup_all_caches
+            cleanup_all_caches()
+        except Exception:
+            pass
+
+    scheduler.add_job(
+        _cleanup_caches,
+        trigger="interval",
+        minutes=10,
+        id="cache_cleanup",
         max_instances=1,
         replace_existing=True,
     )

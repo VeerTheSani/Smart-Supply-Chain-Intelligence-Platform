@@ -2,36 +2,31 @@ import axios from 'axios';
 import { BASE_URL } from '../config/api';
 
 /**
+ * API key for backend authentication.
+ * In production, use VITE_API_KEY env var.
+ * Falls back to dev key for local development.
+ */
+const API_KEY = import.meta.env.VITE_API_KEY || 'sc-dev-key-2026';
+
+/**
  * Pre-configured Axios instance for all API calls.
- * Automatically attaches JWT token from localStorage.
+ * Automatically attaches Bearer API key.
  */
 const apiClient = axios.create({
   baseURL: BASE_URL,
   headers: {
     'Content-Type': 'application/json',
+    'Authorization': `Bearer ${API_KEY}`,
   },
-  timeout: 15000,
+  timeout: 45000,
 });
-
-// Request interceptor — attach auth token
-apiClient.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
 
 // Response interceptor — handle 401 globally
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      window.location.href = '/login';
+      console.error('[API] Unauthorized — check API_KEY');
     }
     return Promise.reject(error);
   }

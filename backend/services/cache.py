@@ -83,3 +83,14 @@ weather_cache = TTLCache(default_ttl_seconds=600, max_size=200)
 
 # Traffic is more volatile — 5 minute TTL
 traffic_cache = TTLCache(default_ttl_seconds=300, max_size=200)
+
+
+def cleanup_all_caches():
+    """Remove all expired entries from all caches. Called periodically by scheduler."""
+    before = weather_cache.size + traffic_cache.size
+    weather_cache._cleanup_expired()
+    traffic_cache._cleanup_expired()
+    after = weather_cache.size + traffic_cache.size
+    if before > after:
+        logger.debug(f"[CACHE_CLEANUP] evicted={before - after} remaining={after}")
+
