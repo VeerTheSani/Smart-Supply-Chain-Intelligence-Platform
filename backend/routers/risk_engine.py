@@ -1,4 +1,9 @@
-# services/risk_engine.py
+# routers/risk_engine.py
+# Central risk calculation engine.
+# Computes a weighted risk score from 5 factors:
+#   weather, traffic, events, time_buffer, historical
+# Returns structured breakdown with per-factor contribution.
+
 import logging
 import math
 from datetime import datetime, timezone
@@ -79,10 +84,15 @@ async def _compute_weather_score(
             eta_seconds, total_distance_km
         )
         result = await score_weather_along_route(timed)
-        return {"score": result["score"], "reason": result["reason"], "weight": WEIGHTS["weather"]}
+        return {
+            "score": result["score"], 
+            "reason": result["reason"], 
+            "weight": WEIGHTS["weather"],
+            "point_results": result.get("point_results", [])
+        }
     except Exception as e:
         logger.error(f"Weather scoring failed: {e}")
-        return {"score": 50, "reason": "Weather data unavailable", "weight": WEIGHTS["weather"]}
+        return {"score": 50, "reason": "Weather data unavailable", "weight": WEIGHTS["weather"], "point_results": []}
 
 
 # ── 2. Traffic ─────────────────────────────────────────────────────────────────
@@ -109,6 +119,7 @@ async def _compute_traffic_score(current_location: dict, dest_coords: dict) -> d
     except Exception as e:
         logger.error(f"Traffic scoring failed: {e}")
         return {"score": 50, "reason": "Traffic data unavailable", "weight": WEIGHTS["traffic"], "traffic_ratio": None}
+
 
 # Incident type → risk contribution points
 INCIDENT_SCORE_MAP = {
@@ -220,6 +231,20 @@ async def calculate_risk(shipment: dict) -> dict:
     time_buffer_data = _compute_time_buffer_score(created_at, eta_seconds)
     historical_data  = _compute_historical_score()
 
+    # Apply simulation overrides if present
+    simulated_scenario = shipment.get("_simulated_scenario")
+    simulated_severity = shipment.get("_simulated_severity", "medium")
+    
+    if simulated_scenario == "storm":
+        score = 90 if simulated_severity == "high" else 70 if simulated_severity == "medium" else 50
+        weather_data = {"score": score, "reason": "Simulated Storm", "weight": WEIGHTS["weather"]}
+    elif simulated_scenario == "traffic":
+        score = 85 if simulated_severity == "high" else 65 if simulated_severity == "medium" else 45
+        traffic_data = {"score": score, "reason": "Simulated Traffic", "weight": WEIGHTS["traffic"]}
+    elif simulated_scenario == "blockage":
+        score = 95 if simulated_severity == "high" else 75 if simulated_severity == "medium" else 55
+        event_data = {"score": score, "reason": "Simulated Blockage", "weight": WEIGHTS["events"]}
+
     breakdown = {
         "weather":     weather_data,
         "traffic":     traffic_data,
@@ -231,6 +256,15 @@ async def calculate_risk(shipment: dict) -> dict:
     final_score    = round(sum(d["score"] * d["weight"] for d in breakdown.values()), 2)
     risk_level     = _risk_level(final_score)
     primary_driver = max(breakdown, key=lambda k: breakdown[k]["score"] * breakdown[k]["weight"])
+    
+    # Build enriched breakdown with contribution values
+    enriched_breakdown = {}
+    for factor_name, factor_data in breakdown.items():
+        contribution = round(factor_data["score"] * factor_data["weight"], 2)
+        enriched_breakdown[factor_name] = {
+            **factor_data,
+            "contribution": contribution,
+        }
 
     logger.info(f"Risk: {final_score} | {risk_level} | driver={primary_driver}")
 
@@ -238,6 +272,6 @@ async def calculate_risk(shipment: dict) -> dict:
         "final_score":    final_score,
         "risk_level":     risk_level,
         "primary_driver": primary_driver,
-        "breakdown":      breakdown,
+        "breakdown":      enriched_breakdown,
         "computed_at":    datetime.now(timezone.utc),
     }

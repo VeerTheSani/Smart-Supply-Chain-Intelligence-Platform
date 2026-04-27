@@ -144,6 +144,28 @@ const RiskBreakdown = memo(function RiskBreakdown({ riskAssessment }) {
                     <p className="text-[11px] text-theme-secondary mt-1.5 leading-relaxed">
                       {factor.reason || 'No data'}
                     </p>
+
+                    {/* Point Results Visualizer (Weather Only) */}
+                    {factor.key === 'weather' && factor.point_results && factor.point_results.length > 0 && (
+                      <div className="mt-3 pt-3 border-t border-theme border-dashed">
+                        <h4 className="text-[10px] font-bold text-theme-secondary uppercase tracking-wider mb-2">Advance Weather Prediction Trajectory</h4>
+                        <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
+                          {factor.point_results.map((pt, idx) => (
+                            <div key={idx} className="shrink-0 w-24 bg-theme-secondary rounded-lg p-2 flex flex-col items-center justify-center text-center shadow border border-theme">
+                               <p className="text-[9px] font-black text-theme-primary opacity-80 uppercase">{pt.arrival_time}</p>
+                               <span className={cn("text-[10px] font-bold mt-1 px-1.5 py-0.5 rounded-full border", 
+                                  pt.score > 70 ? "text-red-400 bg-red-500/10 border-red-500/20" : 
+                                  pt.score > 40 ? "text-yellow-400 bg-yellow-500/10 border-yellow-500/20" : 
+                                  "text-green-400 bg-green-500/10 border-green-500/20"
+                               )}>
+                                  {pt.score > 70 ? 'SEVERE' : pt.score > 40 ? 'WARN' : 'CLEAR'}
+                               </span>
+                               <p className="text-[8px] text-theme-secondary mt-1 leading-tight line-clamp-2" title={pt.reason}>{pt.reason}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </motion.div>
                 );
               })}

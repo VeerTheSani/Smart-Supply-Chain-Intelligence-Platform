@@ -112,7 +112,7 @@ async def _score_waypoint_at_arrival(
             "lng":    lng,
             "score":  0,          # treat unavailable as clear — don't penalise
             "reason": "Weather data unavailable",
-            "arrival_time": arrival_time.strftime("%H:%M"),
+            "arrival_time": arrival_time.strftime("%I:%M %p"),
             "raw":    {}
         }
 
@@ -139,7 +139,7 @@ async def _score_waypoint_at_arrival(
         "lng":          lng,
         "score":        score,
         "reason":       ", ".join(reasons) if reasons else "Clear conditions",
-        "arrival_time": arrival_time.strftime("%d %b %H:%M"),
+        "arrival_time": arrival_time.strftime("%d %b %I:%M %p"),
         "raw": {
             "rainfall_mm":  rainfall,
             "wind_kmh":     wind,

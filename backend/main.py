@@ -31,7 +31,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-from routers import shipments, risk, reroute, websocket, dashboard, incidents
+from routers import shipments, risk, reroute, websocket, dashboard, incidents, cascade
 
 app.include_router(dashboard.router)
 app.include_router(shipments.router)
@@ -40,6 +40,7 @@ app.include_router(reroute.router)
 app.include_router(websocket.router)
 app.include_router(incidents.router)
 app.include_router(notifications.router)
+app.include_router(cascade.router)
 
 
 

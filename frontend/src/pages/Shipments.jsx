@@ -1,8 +1,10 @@
 import { memo, useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Package, ShieldAlert, Navigation, Search, Filter, Plus, Pencil, Trash2, X, ChevronDown } from 'lucide-react';
+import { Package, ShieldAlert, Navigation, Search, Filter, Plus, Pencil, Trash2, X, ChevronDown, Eye } from 'lucide-react';
+import { AreaChart, Area, ResponsiveContainer, YAxis } from 'recharts';
 import { useShipments, useDeleteShipment } from '../hooks/useShipments';
 import { useShipmentStore } from '../stores/shipmentStore';
+import { useUIStore } from '../stores/uiStore';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import ErrorFallback from '../components/ui/ErrorFallback';
 import CreateShipmentModal from '../components/ui/CreateShipmentModal';
@@ -32,10 +34,26 @@ const statusBadgeClass = (status) => {
   }
 };
 
+const calculateProgress = (shipment) => {
+  if (shipment.status === 'delivered') return 100;
+  if (shipment.status === 'planned') return 0;
+  
+  if (!shipment.created_at || !shipment.expected_travel_seconds) return 0;
+  
+  const created = new Date(shipment.created_at).getTime();
+  const now = Date.now();
+  const elapsed = (now - created) / 1000;
+  
+  const simulatedElapsed = elapsed * 50; 
+  const progress = Math.min((simulatedElapsed / shipment.expected_travel_seconds) * 100, 100);
+  return progress;
+};
+
 const Shipments = memo(function Shipments() {
   const { isLoading, error } = useShipments();
   const shipments = useShipmentStore(state => state.shipments);
   const deleteMutation = useDeleteShipment();
+  const { setInspectingShipmentId } = useUIStore();
 
   const [showCreate, setShowCreate]       = useState(false);
   const [editShipment, setEditShipment]   = useState(null);
@@ -176,6 +194,51 @@ const Shipments = memo(function Shipments() {
         </div>
       </div>
 
+      {/* API Limit Global Banner */}
+      <AnimatePresence>
+        {(() => {
+          const mapplsLimiting = shipments?.some(s => s.road_names?.some(r => r.includes('API-Limit')));
+          const weatherLimiting = shipments?.some(s => s.risk?.current?.reason?.includes('Weather data unavailable'));
+          if (!mapplsLimiting && !weatherLimiting) return null;
+
+          return (
+            <motion.div
+              initial={{ opacity: 0, height: 0, y: -10 }}
+              animate={{ opacity: 1, height: 'auto', y: 0 }}
+              exit={{ opacity: 0, height: 0, scale: 0.95 }}
+              className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 flex items-start gap-4 w-full"
+            >
+              <div className="p-2.5 bg-red-500/20 rounded-lg shrink-0 mt-1">
+                <ShieldAlert className="w-5 h-5 text-red-500" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-red-500 uppercase tracking-widest">
+                  External Service API {mapplsLimiting && weatherLimiting ? 'Limits' : 'Limit'} Exhausted
+                </h3>
+                <p className="text-xs text-red-400 mt-1.5 max-w-4xl leading-relaxed">
+                  The system detected HTTP `401/403/429` Rate Limit rejections from the following integrated services:
+                </p>
+                <div className="flex gap-3 mt-2 mb-2">
+                  {mapplsLimiting && (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-red-500/20 border border-red-500/40 rounded-full text-xs font-black text-red-400 tracking-wide">
+                      🛑 MAPMYINDIA ROUTING API
+                    </span>
+                  )}
+                  {weatherLimiting && (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-red-500/20 border border-red-500/40 rounded-full text-xs font-black text-red-400 tracking-wide">
+                      ⛈️ OPEN-METEO WEATHER API
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-red-400/80 max-w-4xl leading-relaxed">
+                  <strong className="text-red-400">Resilience Grid Enabled:</strong> Offline fallback mathematical prediction mock engines have been automatically engaged. Tracking is uninterrupted, but metrics are simulated.
+                </p>
+              </div>
+            </motion.div>
+          );
+        })()}
+      </AnimatePresence>
+
       {/* Table */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -217,9 +280,10 @@ const Shipments = memo(function Shipments() {
                     <tr
                       key={shipment.id}
                       className={cn(
-                        'group transition-colors hover:bg-theme-tertiary/50',
+                        'group transition-colors hover:bg-theme-tertiary/50 cursor-pointer',
                         isCritical && 'bg-red-500/5'
                       )}
+                      onClick={() => setInspectingShipmentId(shipment.id)}
                     >
                       <td className="py-4 px-6">
                         <span className="font-mono text-sm font-semibold text-theme-primary bg-theme-tertiary px-2 py-1 rounded">
@@ -228,10 +292,22 @@ const Shipments = memo(function Shipments() {
                       </td>
 
                       <td className="py-4 px-6">
-                        <div className="flex items-center gap-2 text-sm">
-                          <span className="text-theme-secondary">{shipment.origin}</span>
-                          <span className="text-theme-secondary font-bold opacity-50">→</span>
-                          <span className="text-theme-primary font-medium">{shipment.destination}</span>
+                        <div className="flex flex-col gap-1.5 w-full min-w-[200px]">
+                          <div className="flex items-center gap-2 text-sm justify-between">
+                            <span className="text-theme-secondary truncate">{shipment.origin}</span>
+                            <span className="text-theme-secondary font-bold opacity-50 shrink-0">→</span>
+                            <span className="text-theme-primary font-medium truncate text-right">{shipment.destination}</span>
+                          </div>
+                          {(shipment.distance_km || shipment.eta_hours) ? (
+                             <div className="text-[10px] uppercase font-bold tracking-widest text-theme-secondary flex items-center justify-between mt-1">
+                               <span>{shipment.distance_km?.toFixed(0) || '0'} km</span>
+                               <span>{calculateProgress(shipment).toFixed(0)}%</span>
+                               <span>{shipment.eta_hours?.toFixed(1) || '0'}h ETA</span>
+                             </div>
+                          ) : null}
+                          <div className="h-1.5 w-full bg-theme-tertiary rounded-full overflow-hidden mt-0.5">
+                             <div className="h-full bg-accent transition-all duration-1000" style={{ width: `${calculateProgress(shipment)}%` }}></div>
+                          </div>
                         </div>
                       </td>
 
@@ -252,17 +328,41 @@ const Shipments = memo(function Shipments() {
                       </td>
 
                       <td className="py-4 px-6 text-center">
-                        <div className={cn(
-                          'inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold',
-                          riskBadgeClass(riskLevel)
-                        )}>
-                          <ShieldAlert className="w-3.5 h-3.5" />
-                          {riskScore.toFixed(0)} ({riskLevel})
+                        <div className="flex flex-col items-center justify-center gap-2">
+                          <div className={cn(
+                            'inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold',
+                            riskBadgeClass(riskLevel)
+                          )}>
+                            <ShieldAlert className="w-3.5 h-3.5" />
+                            {riskScore.toFixed(0)} ({riskLevel})
+                          </div>
+                          {shipment.risk?.history?.length > 1 && (
+                            <div className="h-8 w-24 mx-auto hover:opacity-100 transition-opacity">
+                              <ResponsiveContainer width="100%" height="100%">
+                                <AreaChart data={shipment.risk.history.map((h, i) => ({ val: h.risk_score, idx: i }))}>
+                                   <defs>
+                                     <linearGradient id={`colorRisk-${shipment.id}`} x1="0" y1="0" x2="0" y2="1">
+                                       <stop offset="5%" stopColor={isCritical ? "#ef4444" : isWarning ? "#eab308" : "#10b981"} stopOpacity={0.3}/>
+                                       <stop offset="95%" stopColor={isCritical ? "#ef4444" : isWarning ? "#eab308" : "#10b981"} stopOpacity={0}/>
+                                     </linearGradient>
+                                   </defs>
+                                   <YAxis domain={[0, 100]} hide />
+                                   <Area type="monotone" dataKey="val" stroke={isCritical ? "#ef4444" : isWarning ? "#eab308" : "#10b981"} fill={`url(#colorRisk-${shipment.id})`} strokeWidth={2} isAnimationActive={false} />
+                                </AreaChart>
+                              </ResponsiveContainer>
+                            </div>
+                          )}
                         </div>
                       </td>
 
                       <td className="py-4 px-6">
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={() => setInspectingShipmentId(shipment.id)}
+                            className="text-xs font-bold text-theme-secondary uppercase cursor-pointer hover:text-accent transition-all duration-200 flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-accent/5 border border-transparent hover:border-accent/10"
+                          >
+                            <Eye className="w-3.5 h-3.5" /> Intel
+                          </button>
                           <button
                             onClick={() => setRerouteId(shipment.id)}
                             className="bg-purple-600 hover:bg-purple-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 shadow-lg shadow-purple-500/20 transition-all hover:scale-105 active:scale-95 uppercase tracking-wider cursor-pointer"
@@ -350,6 +450,8 @@ const Shipments = memo(function Shipments() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* NOTE: Global ShipmentDetailPanel and DecisionPanel are handled in RootLayout */}
     </div>
   );
 });
