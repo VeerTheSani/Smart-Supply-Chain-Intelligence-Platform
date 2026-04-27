@@ -34,7 +34,7 @@ GEMINI_TTL = {
 
 # ── GPS simulation ────────────────────────────────────────────────────────────
 
-def _advance_location(shipment: dict) -> dict | None:
+async def _advance_location(shipment: dict) -> dict | None:
     """
     Interpolate truck position along route_waypoints based on elapsed time.
     Returns new {"lat", "lng"} or None if journey complete.
@@ -51,7 +51,8 @@ def _advance_location(shipment: dict) -> dict | None:
     if start_time.tzinfo is None:
         start_time = start_time.replace(tzinfo=timezone.utc)
 
-    elapsed  = (datetime.now(timezone.utc) - start_time).total_seconds()
+    now = datetime.now(timezone.utc)
+    elapsed  = (now - start_time).total_seconds()
     
     # ── Speed Multiplier for Demo Visibility ──
     SIMULATION_SPEED = 50 
@@ -60,7 +61,24 @@ def _advance_location(shipment: dict) -> dict | None:
     progress = min(elapsed / eta_seconds, 1.0)
 
     if progress >= 1.0:
-        return waypoints[-1]  # arrived at destination
+        if shipment.get("status") != "delivered":
+            # Mark shipment as delivered when journey is complete
+            await db.shipments.update_one(
+                {"_id": shipment["_id"]},
+                {"$set": {"status": "delivered", "updated_at": now}}
+            )
+            shipment["status"] = "delivered"
+            
+            # Cancel any pending decisions
+            updated_decisions = await db.decisions.update_many(
+                {"shipment_id": str(shipment["_id"]), "status": "pending"},
+                {"$set": {"status": "cancelled", "updated_at": now}}
+            )
+            if updated_decisions.modified_count > 0:
+                from core.countdown_manager import countdown_manager
+                await countdown_manager.cancel_countdown(str(shipment["_id"]))
+
+        return waypoints[-1]
 
     # Interpolate between waypoints
     index = progress * (len(waypoints) - 1)
@@ -159,16 +177,20 @@ async def _process_shipment(shipment: dict):
     shipment_id   = str(shipment["_id"])
     shipment_name = shipment.get("shipment_name", shipment.get("origin_name", "Unknown"))
     
-    # Prevent duplicate reroutes
-    if shipment.get("status") == "rerouted":
+    # Prevent duplicate reroutes or processing of delivered shipments
+    if shipment.get("status") in ["rerouted", "delivered"]:
         return
         
     now           = datetime.now(timezone.utc)
 
     # STEP 1 — Advance GPS location
-    new_location = _advance_location(shipment)
+    new_location = await _advance_location(shipment)
     if new_location:
         shipment["current_location"] = new_location
+
+    # Edge case: If shipment just arrived, do not process risk/decisions
+    if shipment.get("status") == "delivered":
+        return
 
     # STEP 2 — Check if we should call Gemini
     prev_level = (
@@ -206,75 +228,57 @@ async def _process_shipment(shipment: dict):
         # --- STEP 2: LOG DECISIONS (FIXED MODE) ---
         try:
             # 1. Prevent Duplicate Decisions
-            existing_pending = await db.decisions.find_one({
-                "shipment_id": shipment_id,
-                "status": "pending"
-            })
-
-            decision_id_str = None
             from datetime import timedelta
             expires_at = now + timedelta(seconds=120)
 
-            if existing_pending:
-                logger.debug(f"Pending decision already exists for {shipment_id}, skipping creation.")
-                decision_id_str = str(existing_pending["_id"])
-                # Use existing expiry if available
-                if existing_pending.get("countdown_expires_at"):
-                    expires_at = existing_pending["countdown_expires_at"]
-                    if expires_at.tzinfo is None:
-                        expires_at = expires_at.replace(tzinfo=timezone.utc)
-            else:
-                from routers.cascade import get_cascade_impact
-                from models import DecisionCreate, RiskSnapshot, CascadeImpact
-                
-                # Fetch cascade impact
-                dependent_shipments = await get_cascade_impact(shipment_id, max_depth=3)
-                total_delay = round(sum(d["delay_exposure_hours"] for d in dependent_shipments), 2)
-                
-                # Format factors
-                factors_list = [
-                    {"factor": k, "score": v.get("score", 0), "weight": v.get("weight", 0)}
-                    for k, v in breakdown.items()
-                ]
-                
-                # 5. Add confidence_score
-                confidence_score = round(new_score / 100.0, 2)
-                
-                # Create decision document
-                decision_data = DecisionCreate(
-                    shipment_id=shipment_id,
-                    type="auto_reroute",
-                    status="pending",
-                    risk_snapshot=RiskSnapshot(
-                        score=new_score,
-                        level=new_level,
-                        primary_driver=driver,
-                        factors=factors_list
-                    ),
-                    cascade_impact=CascadeImpact(
-                        nodes_affected=len(dependent_shipments),
-                        total_delay_hours=total_delay
-                    ),
-                    reason_summary=reason,
-                    confidence_score=confidence_score,
-                    proposed_route_id="pending_reroute",
-                    countdown_expires_at=expires_at
-                )
-                
-                doc = decision_data.model_dump()
-                doc["created_at"] = now
-                
-                inserted = await db.decisions.insert_one(doc)
-                decision_id_str = str(inserted.inserted_id)
-                
-                # 6. Improve Logging
-                logger.info(f"Created decision {decision_id_str} for shipment {shipment_id} due to {new_level} risk")
+            from routers.cascade import get_cascade_impact
+            
+            # Fetch cascade impact
+            dependent_shipments = await get_cascade_impact(shipment_id, max_depth=3)
+            total_delay = round(sum(d["delay_exposure_hours"] for d in dependent_shipments), 2)
 
-            # 2 & 3: Link Countdown to Decision and use SAME expiry
-            seconds_remaining = max(0, int((expires_at - now).total_seconds()))
-            if seconds_remaining > 0:
-                logger.info(f"Starting reroute countdown for {shipment_id}")
-                await countdown_manager.start_countdown(shipment_id, shipment_name, shipment, decision_id=decision_id_str, seconds=seconds_remaining)
+            # Atomic upsert — only one scheduler cycle wins
+            update_result = await db.decisions.update_one(
+                {"shipment_id": shipment_id, "status": "pending"},
+                {
+                    "$setOnInsert": {
+                        "shipment_id": shipment_id,
+                        "type": "auto_reroute",
+                        "status": "pending",
+                        "risk_snapshot": {
+                            "score": new_score,
+                            "level": new_level,
+                            "primary_driver": driver,
+                            "factors": [
+                                {"factor": k, "score": v.get("score", 0), "weight": v.get("weight", 0)}
+                                for k, v in breakdown.items()
+                            ],
+                        },
+                        "cascade_impact": {
+                            "nodes_affected": len(dependent_shipments),
+                            "total_delay_hours": total_delay,
+                        },
+                        "reason_summary": reason,
+                        "confidence_score": round(new_score / 100.0, 2),
+                        "proposed_route_id": "pending_reroute",
+                        "countdown_expires_at": expires_at,
+                        "created_at": now,
+                    }
+                },
+                upsert=True
+            )
+
+            if update_result.upserted_id:
+                decision_id_str = str(update_result.upserted_id)
+                logger.info(f"Created decision {decision_id_str} for shipment {shipment_id} due to {new_level} risk")
+                
+                # 2 & 3: Link Countdown to Decision and use SAME expiry
+                seconds_remaining = max(0, int((expires_at - now).total_seconds()))
+                if seconds_remaining > 0:
+                    logger.info(f"Starting reroute countdown for {shipment_id}")
+                    await countdown_manager.start_countdown(shipment_id, shipment_name, shipment, decision_id=decision_id_str, seconds=seconds_remaining)
+            else:
+                logger.debug(f"Pending decision already exists for {shipment_id}, skipping creation and countdown broadcast.")
 
         except Exception as e:
             logger.error(f"Failed to log decision for {shipment_id}: {e}")
@@ -293,8 +297,7 @@ async def _process_shipment(shipment: dict):
                 
                 # Also cancel countdown if it's running
                 from core.countdown_manager import countdown_manager
-                if countdown_manager.is_active(shipment_id):
-                    await countdown_manager.cancel_countdown(shipment_id)
+                await countdown_manager.cancel_countdown(shipment_id)
         except Exception as e:
             logger.error(f"Failed to cancel pending decisions for {shipment_id}: {e}")
 
@@ -323,10 +326,17 @@ async def _process_shipment(shipment: dict):
 
     # STEP 8 — Save to MongoDB
     try:
-        await db.shipments.update_one(
-            {"_id": shipment["_id"]},
+        query = {"_id": shipment["_id"]}
+        if "updated_at" in shipment:
+            query["updated_at"] = shipment["updated_at"]
+
+        update_result = await db.shipments.update_one(
+            query,
             mongo_update
         )
+        if update_result.matched_count == 0:
+            logger.warning(f"Optimistic lock failure for shipment {shipment_id} - concurrent update detected.")
+            return
     except Exception as e:
         logger.error(f"MongoDB update failed for {shipment_id}: {e}")
         return
@@ -478,9 +488,10 @@ async def check_pending_decisions():
                 reroute_data = await _apply_auto_reroute(shipment)
                 
                 if reroute_data:
-                    await countdown_manager.execute_reroute_success(shipment_id, shipment_name, reroute_data)
+                    await countdown_manager.execute_reroute_result(shipment_id, shipment_name, reroute_data, success=True)
                 else:
                     logger.warning(f"Auto-reroute failed for {shipment_id}")
+                    await countdown_manager.execute_reroute_result(shipment_id, shipment_name, None, success=False)
             else:
                 # Broadcast update
                 await countdown_manager.broadcast_update(shipment_id, shipment_name, remaining)
@@ -500,7 +511,7 @@ async def update_gps_positions():
         }).to_list(None)
 
         for shipment in active:
-            new_location = _advance_location(shipment)
+            new_location = await _advance_location(shipment)
             if not new_location:
                 continue
 

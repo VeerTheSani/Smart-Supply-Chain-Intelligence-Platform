@@ -31,6 +31,7 @@ class CountdownManager:
         from core.websocket_manager import manager
         await manager.broadcast({
             "type": "countdown_started",
+            "event_id": f"cd_start_{decision_id or shipment_id}",
             "shipment_id": shipment_id,
             "shipment_name": shipment_name,
             "decision_id": decision_id,
@@ -68,6 +69,7 @@ class CountdownManager:
         from core.websocket_manager import manager
         await manager.broadcast({
             "type": "countdown_cancelled",
+            "event_id": f"cd_cancel_{shipment_id}_{int(datetime.now().timestamp())}",
             "shipment_id": shipment_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
@@ -75,25 +77,41 @@ class CountdownManager:
         logger.info(f"Countdown cancelled broadcast for {shipment_id}")
         return True
 
-    async def execute_reroute_success(self, shipment_id: str, shipment_name: str, reroute_data: dict):
+    async def execute_reroute_result(self, shipment_id: str, shipment_name: str, reroute_data: Optional[dict], success: bool):
         from core.websocket_manager import manager
         await manager.broadcast({
             "type": "reroute_executed",
+            "event_id": f"rr_exec_{shipment_id}_{int(datetime.now().timestamp())}",
             "shipment_id": shipment_id,
             "shipment_name": shipment_name,
-            "success": True,
+            "success": success,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
-        logger.info(f"Auto-reroute executed for {shipment_id}")
+        if success:
+            if reroute_data:
+                impact = f"Route updated to avoid risks. Distance: {reroute_data.get('distance_km', 0)} km, ETA: {reroute_data.get('eta_hours', 0)} hours."
+            else:
+                impact = "Route updated — distance data unavailable."
+            
+            title = "Shipment Rerouted"
+            message = f"{shipment_name} was rerouted successfully."
+            severity = "critical"
+        else:
+            impact = "Auto-reroute failed to find alternatives."
+            title = "Reroute Failed"
+            message = f"Auto-reroute failed for {shipment_name}."
+            severity = "high"
+
+        logger.info(f"Auto-reroute execution broadcast for {shipment_id} (Success: {success})")
         await db.notifications.insert_one({
             "type": "reroute_executed",
             "shipment_id": shipment_id,
-            "title": "Shipment Rerouted",
-            "message": f"{shipment_name} was rerouted successfully.",
-            "action_taken": "rerouted",
-            "impact": f"Route updated to avoid risks. Distance: {reroute_data.get('distance_km', 0)} km, ETA: {reroute_data.get('eta_hours', 0)} hours.",
-            "severity": "critical",
+            "title": title,
+            "message": message,
+            "action_taken": "rerouted" if success else "reroute_failed",
+            "impact": impact,
+            "severity": severity,
             "read": False,
             "timestamp": datetime.now(timezone.utc).isoformat()
         })
