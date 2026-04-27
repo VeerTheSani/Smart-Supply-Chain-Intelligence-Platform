@@ -29,6 +29,40 @@ TRAFFIC_THRESHOLDS     = [(1.1, 10), (1.3, 30), (1.5, 50), (2.0, 75), (float("in
 TIME_BUFFER_THRESHOLDS = [(0.25, 10), (0.5, 30), (0.75, 50), (1.0, 75), (float("inf"), 95)]
 RISK_LEVELS            = [(30, "LOW"), (60, "MEDIUM"), (85, "HIGH"), (float("inf"), "CRITICAL")]
 
+# TomTom incident → base score contribution
+INCIDENT_SCORE_MAP = {
+    "ROAD_CLOSED":          30,
+    "ACCIDENT":             20,
+    "FLOODING":             18,
+    "DANGEROUS_CONDITIONS": 12,
+    "ROAD_WORKS":           12,
+    "HAZARD":               10,
+    "JAM":                  10,
+    "BROKEN_DOWN_VEHICLE":   8,
+    "HIGH_WINDS":            8,
+    "RAIN":                  6,
+    "ROAD_HAZARD":           5,
+}
+
+# magnitudeOfDelay (0-3) → multiplier
+MAGNITUDE_MULT = {0: 0.5, 1: 0.6, 2: 1.0, 3: 1.5}
+
+
+def _score_stored_incidents(stored_incidents: list[dict]) -> float:
+    """
+    Compute an event score from TomTom incidents already stored in the shipment document.
+    No API call — reads route_incidents field cached by the scheduler.
+    Returns a 0-100 score.
+    """
+    if not stored_incidents:
+        return 0.0
+    total = 0.0
+    for inc in stored_incidents:
+        base = INCIDENT_SCORE_MAP.get(inc.get("type", ""), 5)
+        mult = MAGNITUDE_MULT.get(inc.get("severity", 0), 1.0)
+        total += base * mult
+    return min(round(total), 100)
+
 
 def _threshold(value: float, table: list) -> int:
     for upper, score in table:
@@ -268,6 +302,9 @@ async def calculate_risk(shipment: dict) -> dict:
 
     logger.info(f"Calculating risk: {origin_name} → {dest_name} | skip_gemini={skip_gemini}")
 
+    # Read TomTom incidents already cached in MongoDB by the scheduler
+    stored_incidents = shipment.get("route_incidents", [])
+
     import asyncio
     weather_data, traffic_data, event_data = await asyncio.gather(
         _compute_weather_score(waypoints, current_location, origin_coords, eta_seconds, distance_km),
@@ -280,9 +317,24 @@ async def calculate_risk(shipment: dict) -> dict:
         ),
     )
 
+    # Boost event score from TomTom incidents if they're higher than Gemini's score.
+    # TomTom captures road-level incidents (closures, accidents) that Gemini may miss.
+    incident_score = _score_stored_incidents(stored_incidents)
+    if incident_score > event_data["score"]:
+        incident_reason = (
+            stored_incidents[0]["description"]
+            if stored_incidents else "On-route incident detected"
+        )
+        event_data = {
+            **event_data,
+            "score":          incident_score,
+            "reason":         f"TomTom: {incident_reason}",
+            "incident_count": len(stored_incidents),
+        }
+
     time_buffer_data = _compute_time_buffer_score(created_at, eta_seconds)
     historical_data  = _compute_historical_score()
-    
+
     # Apply simulation overrides if present
     simulated_scenario = shipment.get("_simulated_scenario")
     simulated_severity = shipment.get("_simulated_severity", "medium")

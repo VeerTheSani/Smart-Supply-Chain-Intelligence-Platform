@@ -27,7 +27,6 @@ class CountdownManager:
         """
         Broadcast countdown start for UI. Actual tracking is handled by the scheduler DB loop.
         """
-        # Broadcast countdown_started
         from core.websocket_manager import manager
         await manager.broadcast({
             "type": "countdown_started",
@@ -93,7 +92,7 @@ class CountdownManager:
                 impact = f"Route updated to avoid risks. Distance: {reroute_data.get('distance_km', 0)} km, ETA: {reroute_data.get('eta_hours', 0)} hours."
             else:
                 impact = "Route updated — distance data unavailable."
-            
+
             title = "Shipment Rerouted"
             message = f"{shipment_name} was rerouted successfully."
             severity = "critical"
@@ -115,6 +114,7 @@ class CountdownManager:
             "read": False,
             "timestamp": datetime.now(timezone.utc).isoformat()
         })
+
 
 # Single shared instance
 countdown_manager = CountdownManager()

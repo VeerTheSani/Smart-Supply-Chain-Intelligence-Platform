@@ -5,6 +5,7 @@
 #   2. Recalculates risk (weather + traffic + events)
 #   3. Broadcasts alerts via WebSocket if risk changed
 #   4. Auto-reroutes if HIGH/CRITICAL and auto_reroute_enabled=True
+#   5. Refreshes TomTom incidents in background every cycle
 
 import asyncio
 import logging
@@ -20,25 +21,20 @@ from core.websocket_manager import manager
 logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
 
-# Batch size for concurrent shipment processing
 BATCH_SIZE = 10
 
 GEMINI_TTL = {
-    "LOW":      30 * 60,   # 30 mins
-    "MEDIUM":   15 * 60,   # 15 mins
-    "HIGH":      5 * 60,   #  5 mins
-    "CRITICAL":  2 * 60,   #  2 mins
-    "UNKNOWN":  15 * 60,   # default
+    "LOW":      30 * 60,
+    "MEDIUM":   15 * 60,
+    "HIGH":      5 * 60,
+    "CRITICAL":  2 * 60,
+    "UNKNOWN":  15 * 60,
 }
 
 
-# ── GPS simulation ────────────────────────────────────────────────────────────
+# ── GPS simulation ─────────────────────────────────────────────────────────────
 
 async def _advance_location(shipment: dict) -> dict | None:
-    """
-    Interpolate truck position along route_waypoints based on elapsed time.
-    Returns new {"lat", "lng"} or None if journey complete.
-    """
     waypoints   = shipment.get("route_waypoints", [])
     eta_seconds = shipment.get("expected_travel_seconds")
     start_time  = shipment.get("started_at") or shipment.get("created_at")
@@ -51,25 +47,22 @@ async def _advance_location(shipment: dict) -> dict | None:
     if start_time.tzinfo is None:
         start_time = start_time.replace(tzinfo=timezone.utc)
 
-    now = datetime.now(timezone.utc)
-    elapsed  = (now - start_time).total_seconds()
-    
-    # ── Speed Multiplier for Demo Visibility ──
-    SIMULATION_SPEED = 50 
+    now     = datetime.now(timezone.utc)
+    elapsed = (now - start_time).total_seconds()
+
+    SIMULATION_SPEED = 50
     elapsed *= SIMULATION_SPEED
 
     progress = min(elapsed / eta_seconds, 1.0)
 
     if progress >= 1.0:
         if shipment.get("status") != "delivered":
-            # Mark shipment as delivered when journey is complete
             await db.shipments.update_one(
                 {"_id": shipment["_id"]},
                 {"$set": {"status": "delivered", "updated_at": now}}
             )
             shipment["status"] = "delivered"
-            
-            # Cancel any pending decisions
+
             updated_decisions = await db.decisions.update_many(
                 {"shipment_id": str(shipment["_id"]), "status": "pending"},
                 {"$set": {"status": "cancelled", "updated_at": now}}
@@ -80,7 +73,6 @@ async def _advance_location(shipment: dict) -> dict | None:
 
         return waypoints[-1]
 
-    # Interpolate between waypoints
     index = progress * (len(waypoints) - 1)
     low   = int(index)
     high  = min(low + 1, len(waypoints) - 1)
@@ -93,7 +85,6 @@ async def _advance_location(shipment: dict) -> dict | None:
 
 
 def _should_call_gemini(shipment: dict, current_risk_level: str) -> bool:
-    """Check if enough time has passed since last Gemini call."""
     last_check = shipment.get("last_gemini_check")
     if not last_check:
         return True
@@ -112,45 +103,40 @@ def _should_call_gemini(shipment: dict, current_risk_level: str) -> bool:
 # ── Auto reroute ───────────────────────────────────────────────────────────────
 
 async def _apply_auto_reroute(shipment: dict) -> dict | None:
-    """
-    Get alternatives and apply the Recommended route.
-    Updates MongoDB with new route data.
-    Returns the new risk assessment or None on failure.
-    """
     from routers.reroute_engine import get_alternatives
     from services.segment_service import get_named_waypoints
 
     try:
-        result = await get_alternatives(shipment)
+        result       = await get_alternatives(shipment)
         alternatives = result.get("alternatives", [])
 
         if not alternatives:
             logger.warning(f"No alternatives for auto-reroute on {shipment['_id']}")
             return None
 
-        # Pick Recommended — first in list (reroute_engine sorts it first)
-        recommended = next(
-            (a for a in alternatives if a.get("label") == "Recommended"),
-            alternatives[0]
+        # Prefer Avoidance route if one exists (bypasses a live road closure/flood).
+        # Fall back to Recommended, then first available.
+        chosen = (
+            next((a for a in alternatives if a.get("label") == "Avoidance"), None)
+            or next((a for a in alternatives if a.get("label") == "Recommended"), None)
+            or alternatives[0]
         )
 
-        new_waypoints = recommended.get("waypoints", [])
+        new_waypoints = chosen.get("waypoints", [])
         if not new_waypoints:
             return None
 
-        # Reverse geocode new waypoints
         named = await get_named_waypoints(new_waypoints)
-
-        now = datetime.now(timezone.utc)
+        now   = datetime.now(timezone.utc)
 
         await db.shipments.update_one(
             {"_id": shipment["_id"]},
             {"$set": {
                 "route_waypoints":         new_waypoints,
                 "named_waypoints":         named,
-                "expected_travel_seconds": recommended.get("duration_seconds"),
-                "distance_km":             recommended.get("distance_km"),
-                "eta_hours":               recommended.get("eta_hours"),
+                "expected_travel_seconds": chosen.get("duration_seconds"),
+                "distance_km":             chosen.get("distance_km"),
+                "eta_hours":               chosen.get("eta_hours"),
                 "status":                  "rerouting",
                 "updated_at":              now,
             }}
@@ -158,86 +144,78 @@ async def _apply_auto_reroute(shipment: dict) -> dict | None:
 
         logger.info(
             f"Auto-rerouted shipment {shipment['_id']} "
-            f"to {recommended['label']} route "
-            f"(risk {recommended['risk_score']:.0f})"
+            f"to {chosen['label']} route "
+            f"(risk {chosen['risk_score']:.0f})"
         )
-        return recommended
+        return chosen
 
     except Exception as e:
         logger.error(f"Auto-reroute failed for {shipment['_id']}: {e}")
         return None
 
 
-# ── Main processing function ──────────────────────────────────────────────────
+# ── Main processing function ───────────────────────────────────────────────────
 
 async def _process_shipment(shipment: dict):
-    """Process a single shipment — advance GPS, check risk, alert if changed."""
+    """Process a single shipment — advance GPS, refresh incidents, check risk, alert if changed."""
     from routers.risk_engine import calculate_risk
 
     shipment_id   = str(shipment["_id"])
     shipment_name = shipment.get("shipment_name", shipment.get("origin_name", "Unknown"))
-    
-    # Prevent duplicate reroutes or processing of delivered shipments
+
     if shipment.get("status") in ["rerouted", "delivered"]:
         return
-        
-    now           = datetime.now(timezone.utc)
+
+    now = datetime.now(timezone.utc)
 
     # STEP 1 — Advance GPS location
     new_location = await _advance_location(shipment)
     if new_location:
         shipment["current_location"] = new_location
 
-    # Edge case: If shipment just arrived, do not process risk/decisions
     if shipment.get("status") == "delivered":
         return
 
-    # STEP 2 — Check if we should call Gemini
+    # STEP 2 — Refresh TomTom incidents in background (fire and forget)
+    asyncio.create_task(_refresh_incidents_safe(shipment_id))
+
+    # STEP 3 — Check if we should call Gemini
     prev_level = (
         shipment.get("last_risk_assessment", {}) or {}
     ).get("risk_level", "UNKNOWN")
 
     use_gemini = _should_call_gemini(shipment, prev_level)
 
-    # Temporarily patch shipment to skip Gemini if TTL not reached
     if not use_gemini:
         shipment["_skip_gemini"] = True
 
-    # STEP 3 — Calculate fresh risk
+    # STEP 4 — Calculate fresh risk
     try:
         assessment = await calculate_risk(shipment)
     except Exception as e:
         logger.error(f"Risk calculation failed for {shipment_id}: {e}")
         return
 
-    new_level  = assessment["risk_level"]
-    new_score  = assessment["final_score"]
-    breakdown  = assessment["breakdown"]
-    driver     = assessment["primary_driver"]
-    reason     = breakdown.get(driver, {}).get("reason", "Unknown reason")
+    new_level = assessment["risk_level"]
+    new_score = assessment["final_score"]
+    breakdown = assessment["breakdown"]
+    driver    = assessment["primary_driver"]
+    reason    = breakdown.get(driver, {}).get("reason", "Unknown reason")
 
-    # STEP 4 — Compare to previous
     risk_changed = prev_level != new_level
 
-    # STEP 5 — Start countdown if HIGH/CRITICAL (instead of immediate reroute)
-    auto_rerouted    = False
-    reroute_data     = None
+    auto_rerouted = False
+    reroute_data  = None
 
     if new_level in ["HIGH", "CRITICAL"] and shipment.get("auto_reroute_enabled"):
         from core.countdown_manager import countdown_manager
-        # --- STEP 2: LOG DECISIONS (FIXED MODE) ---
         try:
-            # 1. Prevent Duplicate Decisions
-            from datetime import timedelta
             expires_at = now + timedelta(seconds=120)
 
             from routers.cascade import get_cascade_impact
-            
-            # Fetch cascade impact
             dependent_shipments = await get_cascade_impact(shipment_id, max_depth=3)
             total_delay = round(sum(d["delay_exposure_hours"] for d in dependent_shipments), 2)
 
-            # Atomic upsert — only one scheduler cycle wins
             update_result = await db.decisions.update_one(
                 {"shipment_id": shipment_id, "status": "pending"},
                 {
@@ -270,44 +248,38 @@ async def _process_shipment(shipment: dict):
 
             if update_result.upserted_id:
                 decision_id_str = str(update_result.upserted_id)
-                logger.info(f"Created decision {decision_id_str} for shipment {shipment_id} due to {new_level} risk")
-                
-                # 2 & 3: Link Countdown to Decision and use SAME expiry
+                logger.info(f"Created decision {decision_id_str} for {shipment_id} due to {new_level} risk")
+
                 seconds_remaining = max(0, int((expires_at - now).total_seconds()))
                 if seconds_remaining > 0:
-                    logger.info(f"Starting reroute countdown for {shipment_id}")
-                    await countdown_manager.start_countdown(shipment_id, shipment_name, shipment, decision_id=decision_id_str, seconds=seconds_remaining)
+                    await countdown_manager.start_countdown(
+                        shipment_id, shipment_name, shipment,
+                        decision_id=decision_id_str, seconds=seconds_remaining
+                    )
             else:
-                logger.debug(f"Pending decision already exists for {shipment_id}, skipping creation and countdown broadcast.")
+                logger.debug(f"Pending decision already exists for {shipment_id}, skipping.")
 
         except Exception as e:
             logger.error(f"Failed to log decision for {shipment_id}: {e}")
-        # -----------------------------------------
-        
-    # 4. Add Basic Cancellation on Risk Drop
+
     elif new_level in ["LOW", "MEDIUM"] and prev_level in ["HIGH", "CRITICAL"]:
         try:
-        # Cancel any pending decision if risk drops
             updated = await db.decisions.update_many(
                 {"shipment_id": shipment_id, "status": "pending"},
                 {"$set": {"status": "cancelled", "updated_at": now}}
             )
             if updated.modified_count > 0:
-                logger.info(f"Cancelled {updated.modified_count} pending decision(s) for shipment {shipment_id} due to risk drop to {new_level}")
-                
-                # Also cancel countdown if it's running
+                logger.info(f"Cancelled {updated.modified_count} pending decision(s) for {shipment_id}")
                 from core.countdown_manager import countdown_manager
                 await countdown_manager.cancel_countdown(shipment_id)
         except Exception as e:
             logger.error(f"Failed to cancel pending decisions for {shipment_id}: {e}")
 
-    # STEP 6 — Serialize assessment for MongoDB
     assessment_to_store = {
         **assessment,
         "computed_at": assessment["computed_at"].isoformat()
     }
 
-    # STEP 7 — Build MongoDB update
     mongo_update = {
         "$set": {
             "last_risk_assessment": assessment_to_store,
@@ -324,24 +296,19 @@ async def _process_shipment(shipment: dict):
     if use_gemini:
         mongo_update["$set"]["last_gemini_check"] = now.isoformat()
 
-    # STEP 8 — Save to MongoDB
     try:
         query = {"_id": shipment["_id"]}
         if "updated_at" in shipment:
             query["updated_at"] = shipment["updated_at"]
 
-        update_result = await db.shipments.update_one(
-            query,
-            mongo_update
-        )
+        update_result = await db.shipments.update_one(query, mongo_update)
         if update_result.matched_count == 0:
-            logger.warning(f"Optimistic lock failure for shipment {shipment_id} - concurrent update detected.")
+            logger.warning(f"Optimistic lock failure for {shipment_id} — concurrent update detected.")
             return
     except Exception as e:
         logger.error(f"MongoDB update failed for {shipment_id}: {e}")
         return
 
-    # STEP 9 — Broadcast alert if risk changed OR auto rerouted
     if risk_changed or auto_rerouted:
         if auto_rerouted and reroute_data:
             alert_message = f"Auto-rerouted due to {new_level} risk — {reason}"
@@ -349,11 +316,9 @@ async def _process_shipment(shipment: dict):
             alert_message = reason
 
         alert = {
-            # Frontend listens for exactly "risk_alert"
             "type":           "risk_alert",
             "shipment_id":    shipment_id,
             "shipment_name":  shipment_name,
-            # level must be lowercase ("high" not "HIGH")
             "level":          new_level.lower(),
             "message":        alert_message,
             "previous_level": prev_level.lower() if prev_level else "unknown",
@@ -369,13 +334,11 @@ async def _process_shipment(shipment: dict):
             f"{prev_level} → {new_level} | {reason[:60]}"
         )
 
-        # Save alert to shipment's alerts_triggered
         await db.shipments.update_one(
             {"_id": shipment["_id"]},
             {"$push": {"alerts_triggered": alert}}
         )
 
-        # Save to global notifications collection
         await db.notifications.insert_one({
             "type": "risk_alert",
             "shipment_id": shipment_id,
@@ -389,13 +352,17 @@ async def _process_shipment(shipment: dict):
         })
 
 
+async def _refresh_incidents_safe(shipment_id: str):
+    """Fire-and-forget TomTom incident refresh. Errors are swallowed."""
+    try:
+        from routers.incidents import fetch_and_store_incidents
+        await fetch_and_store_incidents(shipment_id)
+    except Exception as e:
+        logger.debug(f"Incident refresh skipped for {shipment_id}: {e}")
+
+
 async def recompute_all_shipments():
-    """
-    Main scheduler job.
-    Runs every 5 minutes for all active shipments.
-    Processes shipments in batches of BATCH_SIZE using asyncio.gather
-    for improved throughput with error isolation per shipment.
-    """
+    """Main scheduler job — runs every 5 minutes for all active shipments."""
     logger.info("Scheduler running — checking all active shipments...")
 
     try:
@@ -412,17 +379,14 @@ async def recompute_all_shipments():
 
     logger.info(f"Processing {len(active)} active shipments in batches of {BATCH_SIZE}")
 
-    # Process in batches for parallelism with error isolation
     for i in range(0, len(active), BATCH_SIZE):
-        batch = active[i:i + BATCH_SIZE]
+        batch     = active[i:i + BATCH_SIZE]
         batch_num = (i // BATCH_SIZE) + 1
 
-        # Wrap each shipment in an error-isolated coroutine
         async def _safe_process(shipment):
             try:
                 await _process_shipment(shipment)
             except Exception as e:
-                # Never let one shipment crash the whole batch
                 logger.error(f"Error processing shipment {shipment.get('_id')}: {e}")
 
         results = await asyncio.gather(
@@ -430,7 +394,6 @@ async def recompute_all_shipments():
             return_exceptions=True,
         )
 
-        # Log any unexpected exceptions that slipped through
         for j, result in enumerate(results):
             if isinstance(result, Exception):
                 sid = batch[j].get("_id", "unknown")
@@ -440,71 +403,58 @@ async def recompute_all_shipments():
 
 
 async def check_pending_decisions():
-    """
-    Fast loop (e.g. 5s) to check all pending decisions.
-    If current_time >= countdown_expires_at -> execute reroute.
-    Else -> broadcast countdown update for UI.
-    """
+    """Fast loop (5s) to check all pending decisions and execute expired ones."""
     now = datetime.now(timezone.utc)
     try:
         pending_decisions = await db.decisions.find({"status": "pending"}).to_list(None)
-        
+
         from core.countdown_manager import countdown_manager
-        
+
         for decision in pending_decisions:
             shipment_id = decision.get("shipment_id")
             decision_id = str(decision["_id"])
-            expires_at = decision.get("countdown_expires_at")
-            
+            expires_at  = decision.get("countdown_expires_at")
+
             if not expires_at:
                 continue
-                
+
             if expires_at.tzinfo is None:
                 expires_at = expires_at.replace(tzinfo=timezone.utc)
-                
+
             remaining = int((expires_at - now).total_seconds())
-            
-            # Fetch shipment details
-            from bson import ObjectId
+
             shipment = await db.shipments.find_one({"_id": ObjectId(shipment_id)})
             if not shipment:
                 continue
-                
+
             shipment_name = shipment.get("shipment_name", shipment.get("origin_name", "Unknown"))
-                
+
             if remaining <= 0:
-                # Execute reroute
                 logger.info(f"Decision {decision_id} expired. Executing auto-reroute for {shipment_id}")
-                
-                # Atomically update status to prevent duplicate execution
+
                 updated = await db.decisions.update_one(
                     {"_id": decision["_id"], "status": "pending"},
                     {"$set": {"status": "executed", "executed_at": now}}
                 )
                 if updated.modified_count == 0:
-                    continue # Someone else executed or cancelled it
-                    
-                # Execute
+                    continue
+
                 reroute_data = await _apply_auto_reroute(shipment)
-                
+
                 if reroute_data:
                     await countdown_manager.execute_reroute_result(shipment_id, shipment_name, reroute_data, success=True)
                 else:
                     logger.warning(f"Auto-reroute failed for {shipment_id}")
                     await countdown_manager.execute_reroute_result(shipment_id, shipment_name, None, success=False)
             else:
-                # Broadcast update
                 await countdown_manager.broadcast_update(shipment_id, shipment_name, remaining)
-                
+
     except Exception as e:
         logger.error(f"Error checking pending decisions: {e}")
 
 
 async def update_gps_positions():
-    """
-    Fast loop (3s) to simulate real-time GPS tracking.
-    Updates position in DB and emits position_update WebSocket event.
-    """
+    """Fast loop (3s) to simulate real-time GPS tracking."""
     try:
         active = await db.shipments.find({
             "status": {"$in": ["in_transit", "rerouting"]}
@@ -515,12 +465,10 @@ async def update_gps_positions():
             if not new_location:
                 continue
 
-            shipment_id = str(shipment["_id"])
-            
-            # Prevent noisy updates if position hasn't moved much
+            shipment_id  = str(shipment["_id"])
             old_location = shipment.get("current_location", {})
-            if (old_location.get("lat") == new_location["lat"] and 
-                old_location.get("lng") == new_location["lng"]):
+            if (old_location.get("lat") == new_location["lat"] and
+                    old_location.get("lng") == new_location["lng"]):
                 continue
 
             await db.shipments.update_one(
@@ -529,10 +477,10 @@ async def update_gps_positions():
             )
 
             await manager.broadcast({
-                "type": "position_update",
+                "type":        "position_update",
                 "shipment_id": shipment_id,
-                "lat": new_location["lat"],
-                "lng": new_location["lng"]
+                "lat":         new_location["lat"],
+                "lng":         new_location["lng"]
             })
 
     except Exception as e:
@@ -547,10 +495,10 @@ def start_scheduler():
         trigger="interval",
         minutes=5,
         id="risk_recompute",
-        max_instances=1,      # never run two at same time
+        max_instances=1,
         replace_existing=True,
     )
-    
+
     scheduler.add_job(
         check_pending_decisions,
         trigger="interval",
@@ -559,8 +507,7 @@ def start_scheduler():
         max_instances=1,
         replace_existing=True,
     )
-    
-    # Fast loop for GPS tracking
+
     scheduler.add_job(
         update_gps_positions,
         trigger="interval",
@@ -569,7 +516,7 @@ def start_scheduler():
         max_instances=1,
         replace_existing=True,
     )
-    
+
     scheduler.start()
     logger.info("Scheduler started — running background jobs")
 

@@ -40,7 +40,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from routers import shipments, risk, reroute, websocket, dashboard, cascade, notifications, scenario
+from routers import shipments, risk, reroute, websocket, dashboard, cascade, notifications, scenario, incidents
 
 app.include_router(dashboard.router)
 app.include_router(shipments.router)
@@ -50,6 +50,7 @@ app.include_router(websocket.router)
 app.include_router(cascade.router)
 app.include_router(notifications.router)
 app.include_router(scenario.router)
+app.include_router(incidents.router)
 
 
 # ── Countdown endpoints (minimal, not a full router) ──────────────────────────
