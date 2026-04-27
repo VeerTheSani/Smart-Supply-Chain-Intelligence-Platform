@@ -1,13 +1,10 @@
 import { memo, useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-<<<<<<< Updated upstream
-import { Package, ShieldAlert, Navigation, Search, Filter, Plus, Pencil, Trash2, X, ChevronDown } from 'lucide-react';
-=======
 import { Package, ShieldAlert, Navigation, Search, Filter, Plus, Pencil, Trash2, X, ChevronDown, Eye } from 'lucide-react';
 import { AreaChart, Area, ResponsiveContainer, YAxis } from 'recharts';
->>>>>>> Stashed changes
 import { useShipments, useDeleteShipment } from '../hooks/useShipments';
 import { useShipmentStore } from '../stores/shipmentStore';
+import { useUIStore } from '../stores/uiStore';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import ErrorFallback from '../components/ui/ErrorFallback';
 import CreateShipmentModal from '../components/ui/CreateShipmentModal';
@@ -56,6 +53,7 @@ const Shipments = memo(function Shipments() {
   const { isLoading, error } = useShipments();
   const shipments = useShipmentStore(state => state.shipments);
   const deleteMutation = useDeleteShipment();
+  const { setInspectingShipmentId } = useUIStore();
 
   const [showCreate, setShowCreate]       = useState(false);
   const [editShipment, setEditShipment]   = useState(null);
@@ -196,8 +194,6 @@ const Shipments = memo(function Shipments() {
         </div>
       </div>
 
-<<<<<<< Updated upstream
-=======
       {/* API Limit Global Banner */}
       <AnimatePresence>
         {(() => {
@@ -243,16 +239,6 @@ const Shipments = memo(function Shipments() {
         })()}
       </AnimatePresence>
 
-      {/* Active countdown alerts at top */}
-      {activeCountdownIds.length > 0 && (
-        <div className="space-y-2">
-          {activeCountdownIds.map(sid => (
-            <CountdownBar key={sid} shipmentId={sid} />
-          ))}
-        </div>
-      )}
-
->>>>>>> Stashed changes
       {/* Table */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -294,9 +280,10 @@ const Shipments = memo(function Shipments() {
                     <tr
                       key={shipment.id}
                       className={cn(
-                        'group transition-colors hover:bg-theme-tertiary/50',
+                        'group transition-colors hover:bg-theme-tertiary/50 cursor-pointer',
                         isCritical && 'bg-red-500/5'
                       )}
+                      onClick={() => setInspectingShipmentId(shipment.id)}
                     >
                       <td className="py-4 px-6">
                         <span className="font-mono text-sm font-semibold text-theme-primary bg-theme-tertiary px-2 py-1 rounded">
@@ -369,7 +356,13 @@ const Shipments = memo(function Shipments() {
                       </td>
 
                       <td className="py-4 px-6">
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={() => setInspectingShipmentId(shipment.id)}
+                            className="text-xs font-bold text-theme-secondary uppercase cursor-pointer hover:text-accent transition-all duration-200 flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-accent/5 border border-transparent hover:border-accent/10"
+                          >
+                            <Eye className="w-3.5 h-3.5" /> Intel
+                          </button>
                           <button
                             onClick={() => setRerouteId(shipment.id)}
                             className="bg-purple-600 hover:bg-purple-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 shadow-lg shadow-purple-500/20 transition-all hover:scale-105 active:scale-95 uppercase tracking-wider cursor-pointer"
@@ -457,6 +450,8 @@ const Shipments = memo(function Shipments() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* NOTE: Global ShipmentDetailPanel and DecisionPanel are handled in RootLayout */}
     </div>
   );
 });
