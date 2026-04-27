@@ -5,9 +5,9 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import {
   X, ActivitySquare, Clock, Route, ShieldAlert,
-  Zap, Shield, Star, CloudRain, CheckCircle2, TrendingUp, MapPin, AlertTriangle,
+  Zap, Shield, Star, CloudRain, CheckCircle2, TrendingUp, MapPin, AlertTriangle, Navigation
 } from 'lucide-react';
-import { useRerouting, useScoreReroute } from '../../hooks/useShipments';
+import { useRerouting, useScoreReroute, useApplyReroute } from '../../hooks/useShipments';
 import { useShipmentStore } from '../../stores/shipmentStore';
 import LoadingSpinner from './LoadingSpinner';
 import toast from 'react-hot-toast';
@@ -379,7 +379,7 @@ function StatRow({ icon: Icon, label, children }) {
   );
 }
 
-function RouteCard({ alt, isScoring, index, onHover }) {
+function RouteCard({ alt, isScoring, index, onHover, onApply, isApplying }) {
   const meta   = ROUTE_META[alt.label] ?? ROUTE_META.Avoidance;
   const Icon   = meta.icon;
   const etaHrs = ((alt.eta ?? alt.duration_seconds ?? 0) / 3600).toFixed(1);
@@ -516,6 +516,16 @@ function RouteCard({ alt, isScoring, index, onHover }) {
             )}
           </AnimatePresence>
         </div>
+
+        {/* Apply Reroute CTA */}
+        <button
+          onClick={() => onApply(alt)}
+          disabled={isApplying}
+          className="mt-3 w-full py-2.5 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 font-bold text-xs rounded-xl transition-all hover:scale-[1.02] active:scale-95 border border-indigo-500/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isApplying ? <LoadingSpinner size="sm" color="bg-indigo-400" /> : <Navigation className="w-3.5 h-3.5" />}
+          Accept Route
+        </button>
       </div>
     </motion.div>
   );
@@ -526,6 +536,7 @@ function RouteCard({ alt, isScoring, index, onHover }) {
 const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
   const { data, isLoading, error } = useRerouting(shipmentId);
   const scoreMutation = useScoreReroute();
+  const applyMutation = useApplyReroute();
   const [scoredAlts, setScoredAlts] = useState(null);
   const [hoveredAlt, setHoveredAlt] = useState(null);
 
@@ -560,6 +571,24 @@ const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
       toast.success('Risk assessment complete.');
     } catch {
       toast.error('Risk assessment failed. Try again.');
+    }
+  };
+
+  const handleApplyRoute = async (alt) => {
+    try {
+      await applyMutation.mutateAsync({
+        id: shipmentId,
+        payload: {
+          geometry_encoded: alt.geometry_encoded,
+          distance_km: alt.distance,
+          duration_seconds: alt.duration_seconds,
+          waypoints: alt.waypoints
+        }
+      });
+      toast.success(`Route ${alt.route_id} activated! Diverting trajectory.`);
+      onClose();
+    } catch {
+      toast.error('Failed to commit alternative route. Server busy.');
     }
   };
 
@@ -710,6 +739,8 @@ const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
                         isScoring={isScoring}
                         index={i}
                         onHover={setHoveredAlt}
+                        onApply={handleApplyRoute}
+                        isApplying={applyMutation.isPending}
                       />
                     ))}
                   </div>

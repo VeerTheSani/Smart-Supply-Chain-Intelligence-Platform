@@ -301,21 +301,27 @@ const Shipments = memo(function Shipments() {
 
                       <td className="py-4 px-6">
                         <div className="flex flex-col gap-1.5 w-full min-w-[200px]">
-                          <div className="flex items-center flex-wrap gap-2 text-[12px] overflow-hidden">
-                            <span className="text-theme-secondary shrink-0">{shipment.origin_name || shipment.origin}</span>
+                          <div className="flex flex-col gap-3 relative text-[12px] py-1">
+                            <div className="absolute left-[4px] top-2.5 bottom-2.5 w-[2px] bg-theme-tertiary -z-0"></div>
+
+                            <div className="flex items-center gap-2.5 z-10">
+                              <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-[3px] ring-theme-secondary shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+                              <span className="text-theme-secondary font-medium tracking-wide">{shipment.origin_name || shipment.origin}</span>
+                            </div>
                             
                             {shipment.via_points?.map((vp, idx) => (
-                              <div key={idx} className="flex items-center gap-1.5 shrink-0">
-                                <span className="text-theme-secondary font-bold opacity-30">→</span>
-                                <span className="flex items-center gap-1 text-theme-primary bg-theme-tertiary px-1.5 py-0.5 rounded-md border border-theme shadow-sm">
-                                  <span className="text-[10px]">{vp.type === 'pickup' ? '📦' : vp.type === 'delivery' ? '📍' : '⚙️'}</span>
-                                  <span className="truncate max-w-[100px] font-medium">{vp.location_name}</span>
-                                </span>
+                              <div key={idx} className="flex items-center gap-2.5 z-10">
+                                <div className="bg-theme-secondary ml-[-4px] p-0.5 rounded-md border border-theme/40 flex items-center justify-center">
+                                  <span className="text-[11px] leading-none">{vp.type === 'pickup' ? '📦' : vp.type === 'delivery' ? '📍' : '⚙️'}</span>
+                                </div>
+                                <span className="text-theme-primary truncate w-[160px] font-semibold">{vp.location_name}</span>
                               </div>
                             ))}
 
-                            <span className="text-theme-secondary font-bold opacity-30 shrink-0">→</span>
-                            <span className="text-theme-primary font-bold truncate shrink-0">{shipment.destination_name || shipment.destination}</span>
+                            <div className="flex items-center gap-2.5 z-10">
+                              <div className="w-2.5 h-2.5 rounded-full bg-red-500 ring-[3px] ring-theme-secondary shadow-[0_0_8px_rgba(239,68,68,0.5)]"></div>
+                              <span className="text-theme-primary font-bold truncate tracking-wide">{shipment.destination_name || shipment.destination}</span>
+                            </div>
                           </div>
                           {(shipment.distance_km || shipment.eta_hours) ? (
                              <div className="text-[10px] uppercase font-bold tracking-widest text-theme-secondary flex items-center justify-between mt-1">

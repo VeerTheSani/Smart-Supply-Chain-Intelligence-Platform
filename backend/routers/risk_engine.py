@@ -153,13 +153,21 @@ def _compute_event_score(stored_incidents: list[dict]) -> dict:
         }
 
     total = 0.0
+    highest_severity_inc = None
+    max_inc_score = -1
+
     for inc in stored_incidents:
         base = INCIDENT_SCORE_MAP.get(inc.get("type", ""), 5)
         mult = MAGNITUDE_MULT.get(inc.get("severity", 0), 1.0)
-        total += base * mult
+        inc_score = base * mult
+        total += inc_score
+        
+        if inc_score > max_inc_score:
+            max_inc_score = inc_score
+            highest_severity_inc = inc
 
     score  = min(round(total), 100)
-    reason = stored_incidents[0]["description"] if stored_incidents else "No incidents on route"
+    reason = highest_severity_inc["description"] if highest_severity_inc else "No incidents on route"
 
     return {
         "score":          score,

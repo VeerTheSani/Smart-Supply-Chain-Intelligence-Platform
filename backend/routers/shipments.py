@@ -215,15 +215,19 @@ async def create_shipment(data: ShipmentCreate):
     }
 
     result = await db.shipments.insert_one(doc)
-    doc["_id"] = result.inserted_id
-
-    # Kick off incident fetch + initial risk assessment in background
+    # Fetch incidents + assess risk synchronously to apply backpressure against rapid API limit testing
+    # and to ensure the initial risk score cleanly includes the fetched incidents before frontend load.
     from routers.incidents import fetch_and_store_incidents
-    asyncio.create_task(fetch_and_store_incidents(result.inserted_id))
-    asyncio.create_task(_initial_risk_assessment(result.inserted_id, doc))
+    await fetch_and_store_incidents(result.inserted_id)
+    
+    updated_doc = await db.shipments.find_one({"_id": result.inserted_id})
+    if updated_doc:
+        await _initial_risk_assessment(result.inserted_id, updated_doc)
+        # Fetch one last time to get the appended risk assessment for the frontend serialize
+        updated_doc = await db.shipments.find_one({"_id": result.inserted_id})
 
     logger.info(f"Shipment created: {result.inserted_id} | {data.origin_name} → {data.destination_name} | {tracking_number}")
-    return _serialize(doc)
+    return _serialize(updated_doc or doc)
 
 
 # ── GET /api/shipments ─────────────────────────────────────────────────────────
