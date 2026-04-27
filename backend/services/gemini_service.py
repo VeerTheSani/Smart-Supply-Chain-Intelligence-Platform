@@ -1,3 +1,4 @@
+
 # services/gemini_service.py
 # Uses Gemini 2.5 Flash with Google Search grounding to find
 # real-time disruptions along the route.
@@ -6,7 +7,6 @@
 import httpx
 import os
 import json
-import re
 import logging
 from dotenv import load_dotenv
 load_dotenv()
@@ -22,7 +22,7 @@ async def get_route_events(
     destination: str,
     segment_cities: list[str],
     eta_hours: float,
-    road_names: list[str] = None,
+    road_names: list[str] = None,   # ← NH48, SH17 etc
 ) -> dict:
     """
     Ask Gemini to search for any disruptions along the route.
@@ -70,11 +70,17 @@ Respond ONLY with this exact JSON format, nothing else:
 If no disruptions found, return severity_score 0 and empty events_found array."""
 
     payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "tools": [{"google_search": {}}],
+        "contents": [
+            {
+                "parts": [{"text": prompt}]
+            }
+        ],
+        "tools": [
+            {"google_search": {}}   # enables web grounding
+        ],
         "generationConfig": {
-            "temperature": 0.1,
-            "maxOutputTokens": 4048,
+            "temperature": 0.1,     # low temp for factual accuracy
+            "maxOutputTokens":4048,
         }
     }
 
@@ -88,6 +94,7 @@ If no disruptions found, return severity_score 0 and empty events_found array.""
             resp.raise_for_status()
             data = resp.json()
 
+        # Extract text from response
         text = (
             data.get("candidates", [{}])[0]
                 .get("content", {})
@@ -99,6 +106,7 @@ If no disruptions found, return severity_score 0 and empty events_found array.""
             logger.warning("Gemini returned empty response")
             return _default_response("Empty response from Gemini")
 
+        # Clean up response — remove markdown fences if present
         text = text.strip()
         if text.startswith("```"):
             text = text.split("```")[1]
@@ -106,14 +114,12 @@ If no disruptions found, return severity_score 0 and empty events_found array.""
                 text = text[4:]
         text = text.strip()
 
-        # Fix newlines inside JSON string values that Gemini sometimes produces
-        text = re.sub(
-            r':\s*"([^"]*)\n([^"]*)"',
-            lambda m: ': "' + m.group(1).strip() + ' ' + m.group(2).strip() + '"',
-            text
-        )
+        # Fix newlines inside JSON string values — Gemini sometimes does this
+        import re
+        text = re.sub(r':\s*"([^"]*)\n([^"]*)"', lambda m: ': "' + m.group(1).strip() + ' ' + m.group(2).strip() + '"', text)
 
         result = json.loads(text)
+        # Validate required fields
         result.setdefault("severity_score", 0)
         result.setdefault("events_found", [])
         result.setdefault("primary_concern", "No disruptions found")
@@ -150,11 +156,15 @@ def _default_response(reason: str) -> dict:
     }
 
 
+# ── Self test ──────────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
     import asyncio
 
     async def test():
         print("Testing Gemini events service...")
+        print("Searching for disruptions on Ahmedabad → Delhi route...\n")
+
         result = await get_route_events(
             origin="Ahmedabad",
             destination="Delhi",
@@ -162,9 +172,15 @@ if __name__ == "__main__":
             eta_hours=12.0,
             road_names=["NH48", "NH8"],
         )
+
         print(f"Severity score  : {result['severity_score']}/100")
         print(f"Primary concern : {result['primary_concern']}")
         print(f"Confidence      : {result['confidence']}")
         print(f"Events found    : {len(result['events_found'])}")
+        for event in result["events_found"]:
+            print(f"\n  Type     : {event.get('type')}")
+            print(f"  Location : {event.get('location')}")
+            print(f"  Details  : {event.get('description')}")
+            print(f"  Impact   : {event.get('impact')}")
 
     asyncio.run(test())

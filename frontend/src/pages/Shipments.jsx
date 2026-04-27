@@ -1,16 +1,13 @@
 import { memo, useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Package, ShieldAlert, Navigation, Search, Filter, Plus, Pencil, Trash2, X, ChevronDown, Eye } from 'lucide-react';
+import { Package, ShieldAlert, Navigation, Search, Filter, Plus, Pencil, Trash2, X, ChevronDown } from 'lucide-react';
 import { useShipments, useDeleteShipment } from '../hooks/useShipments';
 import { useShipmentStore } from '../stores/shipmentStore';
-import { useUIStore } from '../stores/uiStore';
-import { useCountdownStore } from '../stores/countdownStore';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import ErrorFallback from '../components/ui/ErrorFallback';
 import CreateShipmentModal from '../components/ui/CreateShipmentModal';
 import EditShipmentModal from '../components/ui/EditShipmentModal';
 import RerouteModal from '../components/ui/RerouteModal';
-import CountdownBar from '../components/ui/CountdownBar';
 import toast from 'react-hot-toast';
 import { cn } from '../lib/utils';
 
@@ -20,34 +17,32 @@ const riskBadgeClass = (level) => {
   switch (level) {
     case 'high':
     case 'critical': return 'bg-red-500/10 text-red-400 border border-red-500/20 animate-pulse';
-    case 'medium': return 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20';
-    default: return 'bg-green-500/10 text-green-400 border border-green-500/20';
+    case 'medium':   return 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20';
+    default:         return 'bg-green-500/10 text-green-400 border border-green-500/20';
   }
 };
 
 const statusBadgeClass = (status) => {
   switch (status) {
-    case 'delivered': return 'bg-green-500/10 text-green-400 border border-green-500/20';
+    case 'delivered':  return 'bg-green-500/10 text-green-400 border border-green-500/20';
     case 'in_transit': return 'bg-blue-500/10 text-blue-400 border border-blue-500/20';
-    case 'rerouting': return 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20';
-    case 'delayed': return 'bg-orange-500/10 text-orange-400 border border-orange-500/20';
-    default: return 'bg-theme-tertiary text-theme-secondary border border-theme';
+    case 'rerouting':  return 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20';
+    case 'delayed':    return 'bg-orange-500/10 text-orange-400 border border-orange-500/20';
+    default:           return 'bg-theme-tertiary text-theme-secondary border border-theme';
   }
 };
 
 const Shipments = memo(function Shipments() {
   const { isLoading, error } = useShipments();
   const shipments = useShipmentStore(state => state.shipments);
-  const countdowns = useCountdownStore(state => state.countdowns);
   const deleteMutation = useDeleteShipment();
-  const { inspectingShipmentId, setInspectingShipmentId } = useUIStore();
 
-  const [showCreate, setShowCreate] = useState(false);
-  const [editShipment, setEditShipment] = useState(null);
-  const [deleteTarget, setDeleteTarget] = useState(null);
-  const [rerouteId, setRerouteId] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [showCreate, setShowCreate]       = useState(false);
+  const [editShipment, setEditShipment]   = useState(null);
+  const [deleteTarget, setDeleteTarget]   = useState(null);
+  const [rerouteId, setRerouteId]         = useState(null);
+  const [searchQuery, setSearchQuery]     = useState('');
+  const [statusFilter, setStatusFilter]   = useState('all');
   const [showFilterMenu, setShowFilterMenu] = useState(false);
 
   const filterRef = useRef(null);
@@ -88,9 +83,6 @@ const Shipments = memo(function Shipments() {
       setDeleteTarget(null);
     }
   };
-
-  // Active countdowns to show at top
-  const activeCountdownIds = Object.keys(countdowns);
 
   if (isLoading) {
     return (
@@ -184,15 +176,6 @@ const Shipments = memo(function Shipments() {
         </div>
       </div>
 
-      {/* Active countdown alerts at top */}
-      {activeCountdownIds.length > 0 && (
-        <div className="space-y-2">
-          {activeCountdownIds.map(sid => (
-            <CountdownBar key={sid} shipmentId={sid} />
-          ))}
-        </div>
-      )}
-
       {/* Table */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -226,20 +209,17 @@ const Shipments = memo(function Shipments() {
               ) : (
                 filteredShipments.map((shipment) => {
                   const riskLevel = shipment.risk?.current?.risk_level || 'low';
-                  const riskScore = shipment.risk?.current?.risk_score || 0;
+                  const riskScore = shipment.risk?.current?.risk_score  || 0;
                   const isCritical = riskLevel === 'high' || riskLevel === 'critical';
-                  const isWarning = riskLevel === 'medium';
-                  const hasCountdown = !!countdowns[shipment.id];
+                  const isWarning  = riskLevel === 'medium';
 
                   return (
                     <tr
                       key={shipment.id}
                       className={cn(
-                        'group transition-colors hover:bg-theme-tertiary/50 cursor-pointer',
-                        isCritical && 'bg-red-500/5',
-                        hasCountdown && 'bg-amber-500/5'
+                        'group transition-colors hover:bg-theme-tertiary/50',
+                        isCritical && 'bg-red-500/5'
                       )}
-                      onClick={() => setInspectingShipmentId(shipment.id)}
                     >
                       <td className="py-4 px-6">
                         <span className="font-mono text-sm font-semibold text-theme-primary bg-theme-tertiary px-2 py-1 rounded">
@@ -256,19 +236,12 @@ const Shipments = memo(function Shipments() {
                       </td>
 
                       <td className="py-4 px-6">
-                        <div className="flex items-center gap-2">
-                          <span className={cn(
-                            'inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wide',
-                            statusBadgeClass(shipment.status)
-                          )}>
-                            {shipment.status?.replace('_', ' ')}
-                          </span>
-                          {hasCountdown && (
-                            <span className="text-[9px] font-black text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20 animate-pulse shadow-[0_0_10px_rgba(251,191,36,0.2)]">
-                              REROUTING
-                            </span>
-                          )}
-                        </div>
+                        <span className={cn(
+                          'inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wide',
+                          statusBadgeClass(shipment.status)
+                        )}>
+                          {shipment.status?.replace('_', ' ')}
+                        </span>
                       </td>
 
                       <td className="py-4 px-6">
@@ -289,13 +262,7 @@ const Shipments = memo(function Shipments() {
                       </td>
 
                       <td className="py-4 px-6">
-                        <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            onClick={() => setInspectingShipmentId(shipment.id)}
-                            className="text-xs font-bold text-theme-secondary uppercase cursor-pointer hover:text-accent transition-all duration-200 flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-accent/5 border border-transparent hover:border-accent/10"
-                          >
-                            <Eye className="w-3.5 h-3.5" /> Intel
-                          </button>
+                        <div className="flex items-center justify-end gap-2">
                           <button
                             onClick={() => setRerouteId(shipment.id)}
                             className="bg-purple-600 hover:bg-purple-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 shadow-lg shadow-purple-500/20 transition-all hover:scale-105 active:scale-95 uppercase tracking-wider cursor-pointer"
@@ -383,8 +350,6 @@ const Shipments = memo(function Shipments() {
           </div>
         )}
       </AnimatePresence>
-
-      {/* NOTE: Global ShipmentDetailPanel and DecisionPanel are handled in RootLayout */}
     </div>
   );
 });

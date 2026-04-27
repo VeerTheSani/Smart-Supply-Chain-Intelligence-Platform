@@ -135,21 +135,10 @@ body {
 .marker-pulse-high { animation: marker-pulse-red 1.5s infinite; }
 .marker-pulse-medium { animation: marker-pulse-yellow 2s infinite; }
 
-/* ============================================
-   SCENARIO LAB — TRUCK MARKER
-   ============================================ */
-
-/* Remove default Leaflet icon background/border */
-.scenario-truck-icon {
-  background: none !important;
-  border: none !important;
+.hidden-routing-panel {
+  display: none !important;
 }
 
-/* Smooth rotation + position transition */
-.scenario-truck-wrap {
-  transition: transform 0.4s linear;
-  filter: drop-shadow(0 2px 6px rgba(59, 130, 246, 0.5));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
+.leaflet-routing-container {
+  display: none !important;
+}

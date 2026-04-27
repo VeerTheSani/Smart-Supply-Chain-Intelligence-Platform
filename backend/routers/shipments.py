@@ -1,4 +1,5 @@
 # routers/shipments.py
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -12,7 +13,6 @@ from database import db
 from models import ShipmentCreate, ShipmentUpdate
 from services.geocoding_service import geocode
 from services.mappls_service import get_route
-from services.segment_service import get_named_waypoints
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/shipments", tags=["shipments"])
@@ -41,6 +41,8 @@ def _serialize(doc: dict) -> dict:
 
     # Her frontend expects: conditions.weather, conditions.traffic
     doc.setdefault("conditions", {"weather": "clear", "traffic": "low"})
+    if not doc.get("route_incidents"):
+        doc["route_incidents"] = []
 
     # Her frontend expects: risk.current.risk_level / risk_score / reason
     # Our backend stores:   last_risk_assessment.risk_level / final_score / breakdown
@@ -87,6 +89,22 @@ async def _get_or_404(id: str) -> dict:
     return doc
 
 
+async def _initial_risk_assessment(shipment_id, doc: dict):
+    """Run risk calculation immediately after creation and persist to MongoDB."""
+    try:
+        from routers.risk_engine import calculate_risk
+        assessment = await calculate_risk(doc)
+        assessment_to_store = {**assessment, "computed_at": assessment["computed_at"].isoformat()}
+        await db.shipments.update_one(
+            {"_id": shipment_id},
+            {"$set": {"last_risk_assessment": assessment_to_store, "updated_at": datetime.now(timezone.utc)},
+             "$push": {"risk_history": assessment_to_store}},
+        )
+        logger.info(f"Initial risk assessment stored for {shipment_id}: {assessment['risk_level']} ({assessment['final_score']})")
+    except Exception as e:
+        logger.error(f"Initial risk assessment failed for {shipment_id}: {e}")
+
+
 # ── POST /api/shipments ────────────────────────────────────────────────────────
 
 @router.post("", status_code=201)
@@ -116,7 +134,6 @@ async def create_shipment(data: ShipmentCreate):
     dest_coords   = {"lat": dest_geo["lat"],   "lng": dest_geo["lng"]}
 
     route_waypoints      = []
-    named_waypoints      = []
     road_names           = []
     distance_km          = None
     expected_travel_secs = None
@@ -127,6 +144,7 @@ async def create_shipment(data: ShipmentCreate):
         route_waypoints = route["waypoints"]
         distance_km     = route["distance_km"]
         road_names      = route.get("road_names", [])
+        geometry_encoded = route.get("geometry_encoded", "")
 
         duration_with    = route["duration_seconds"]
         duration_without = route.get("duration_no_traffic_seconds", duration_with)
@@ -134,7 +152,7 @@ async def create_shipment(data: ShipmentCreate):
         expected_travel_secs = int(duration_with * 1.35) if duration_with == duration_without else duration_with
         eta_hours = round(expected_travel_secs / 3600, 2)
 
-        named_waypoints = await get_named_waypoints(route_waypoints)
+
 
     except RuntimeError as e:
         logger.warning(f"Route fetch failed for {data.origin_name}→{data.destination_name}: {e}")
@@ -153,6 +171,7 @@ async def create_shipment(data: ShipmentCreate):
         "destination_name":      data.destination_name,
         "destination_resolved":  dest_geo["display_name"],
         "destination_coords":    dest_coords,
+        "route_geometry_encoded": geometry_encoded, 
 
         # Frontend compatibility fields (her schema)
         "tracking_number":       tracking_number,
@@ -166,11 +185,11 @@ async def create_shipment(data: ShipmentCreate):
         # so setting None means the shipment never appears until scheduler runs (5 min).
         "current_location":          origin_coords,
         "route_waypoints":           route_waypoints,
-        "named_waypoints":           named_waypoints,
         "road_names":                road_names,
         "distance_km":               distance_km,
         "expected_travel_seconds":   expected_travel_secs,
         "eta_hours":                 eta_hours,
+        
 
         # Config
         "status":               "planned",
@@ -188,6 +207,11 @@ async def create_shipment(data: ShipmentCreate):
 
     result = await db.shipments.insert_one(doc)
     doc["_id"] = result.inserted_id
+
+    # Kick off incident fetch + initial risk assessment in background
+    from routers.incidents import fetch_and_store_incidents
+    asyncio.create_task(fetch_and_store_incidents(result.inserted_id))
+    asyncio.create_task(_initial_risk_assessment(result.inserted_id, doc))
 
     logger.info(f"Shipment created: {result.inserted_id} | {data.origin_name} → {data.destination_name} | {tracking_number}")
     return _serialize(doc)

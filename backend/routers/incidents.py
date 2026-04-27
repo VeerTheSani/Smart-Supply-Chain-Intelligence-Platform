@@ -8,7 +8,7 @@
 #
 # BACKGROUND REFRESH:
 #   fetch_and_store_incidents() is called:
-#     - As a background task when a shipment is created
+#     - As a fire-and-forget background task when a shipment is created
 #     - Every scheduler cycle (5 min) for active shipments
 #   This keeps route_incidents current without per-request TomTom calls.
 
@@ -34,8 +34,8 @@ TOMTOM_KEY = os.getenv("TOMTOM_KEY")
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/shipments", tags=["incidents"])
 
-CORRIDOR_KM  = 0.2
-BBOX_PADDING = 0.5
+CORRIDOR_KM  = 0.2   # km — TomTom incident coords are often offset from road centerline
+BBOX_PADDING = 0.5   # degrees — corridor filter tightens it down
 
 
 # ── Geometry helpers ──────────────────────────────────────────────────────────
@@ -148,13 +148,19 @@ def _parse_incidents(raw: list[dict], waypoints: list[dict]) -> list[dict]:
 
 # ── Core TomTom fetch (reusable) ──────────────────────────────────────────────
 
-MAX_BBOX_SEGMENTS = 20
+MAX_BBOX_SEGMENTS = 20   # max TomTom calls per shipment — prevents timeout on long routes
 
 
 async def _fetch_tomtom_incidents(
     sparse_waypoints: list[dict],
     corridor_points: list[dict] | None = None,
 ) -> list[dict]:
+    """
+    Hit TomTom for route segments and return filtered incident list.
+
+    sparse_waypoints — used for bbox generation (few segments → few API calls)
+    corridor_points  — used for per-incident corridor check (can be dense); falls back to sparse
+    """
     if len(sparse_waypoints) < 2:
         return []
 
@@ -179,6 +185,7 @@ async def _fetch_tomtom_incidents(
             pass
         return []
 
+    # Thin sparse_waypoints if still too many (e.g. 50km-sampled can still be large)
     pts = sparse_waypoints
     if len(pts) - 1 > MAX_BBOX_SEGMENTS:
         step = (len(pts) - 1) / MAX_BBOX_SEGMENTS
@@ -188,7 +195,7 @@ async def _fetch_tomtom_incidents(
     for i in range(len(pts) - 1):
         lats = [pts[i]["lat"],   pts[i+1]["lat"]]
         lngs = [pts[i]["lng"],   pts[i+1]["lng"]]
-        pad  = 0.15
+        pad  = 0.15   # ~16km padding so incidents near waypoints aren't clipped
         bboxes.append(
             f"{min(lngs)-pad:.4f},{min(lats)-pad:.4f},"
             f"{max(lngs)+pad:.4f},{max(lats)+pad:.4f}"
@@ -196,7 +203,7 @@ async def _fetch_tomtom_incidents(
 
     all_raw = []
     async with httpx.AsyncClient(timeout=10.0) as client:
-        BATCH = 10
+        BATCH = 10  # conservative — TomTom free tier is rate-limited
         for i in range(0, len(bboxes), BATCH):
             batch   = bboxes[i:i + BATCH]
             results = await asyncio.gather(*[fetch_one(client, b) for b in batch])
@@ -211,7 +218,7 @@ async def _fetch_tomtom_incidents(
 async def fetch_and_store_incidents(shipment_id: str | ObjectId) -> list[dict]:
     """
     Fetch live incidents from TomTom for a shipment and persist them to
-    MongoDB (route_incidents field). Returns the filtered incident list.
+    MongoDB (route_incidents field).  Returns the filtered incident list.
 
     Called:
       - As a background task when a shipment is created
@@ -229,6 +236,8 @@ async def fetch_and_store_incidents(shipment_id: str | ObjectId) -> list[dict]:
         if len(waypoints) < 2:
             return []
 
+        # Sparse waypoints → generate bbox queries (few API calls)
+        # Dense decoded geometry → accurate corridor matching
         dense_points = None
         if encoded:
             raw_coords   = _decode_polyline(encoded)
@@ -236,6 +245,9 @@ async def fetch_and_store_incidents(shipment_id: str | ObjectId) -> list[dict]:
 
         incidents = await _fetch_tomtom_incidents(waypoints, corridor_points=dense_points)
 
+        # Only overwrite stored incidents if TomTom returned data.
+        # An empty result likely means API failure (403/rate-limit), not a clear route —
+        # preserves previously fetched incidents instead of wiping them.
         if incidents:
             await db.shipments.update_one(
                 {"_id": oid},
@@ -268,6 +280,7 @@ async def get_route_incidents(id: str):
     if not shipment:
         raise HTTPException(status_code=404, detail="Shipment not found")
 
+    # Serve from MongoDB if fresh (updated within last 10 minutes)
     stored_at = shipment.get("route_incidents_updated_at")
     stored    = shipment.get("route_incidents")
 
@@ -287,6 +300,7 @@ async def get_route_incidents(id: str):
                 "corridor_km": CORRIDOR_KM,
             }
 
+    # Stale or missing — fetch live and store
     incidents = await fetch_and_store_incidents(id)
 
     return {

@@ -79,8 +79,8 @@ const riskColor = (level) => {
   switch (level) {
     case 'high':
     case 'critical': return 'text-red-400';
-    case 'medium': return 'text-yellow-400';
-    default: return 'text-emerald-400';
+    case 'medium':   return 'text-yellow-400';
+    default:         return 'text-emerald-400';
   }
 };
 
@@ -88,8 +88,8 @@ const riskBarColor = (level) => {
   switch (level) {
     case 'high':
     case 'critical': return '#ef4444';
-    case 'medium': return '#eab308';
-    default: return '#34d399';
+    case 'medium':   return '#eab308';
+    default:         return '#34d399';
   }
 };
 
@@ -121,9 +121,9 @@ function FitAlts({ alternatives, primaryWaypoints }) {
 
 const INCIDENT_COLOR = {
   ROAD_CLOSED: '#ef4444',
-  ACCIDENT: '#ef4444',
-  JAM: '#f97316',
-  ROAD_WORKS: '#f97316',
+  ACCIDENT:    '#ef4444',
+  JAM:         '#f97316',
+  ROAD_WORKS:  '#f97316',
 };
 
 const SEVERITY_LABELS = ['Unknown', 'Minor', 'Moderate', 'Major', 'Critical'];
@@ -227,11 +227,11 @@ function RouteMapInner({ alternatives, primaryWaypoints, primaryGeometryEncoded,
         const label = inc.type.replace(/_/g, ' ');
         const emoji = inc.type === 'ROAD_CLOSED' ? '🚧'
           : inc.type === 'ACCIDENT' ? '💥'
-            : inc.type === 'JAM' ? '🚦'
-              : inc.type === 'FLOODING' ? '🌊'
-                : inc.type === 'HIGH_WINDS' ? '🌬️'
-                  : inc.type === 'ROAD_WORKS' ? '👷'
-                    : '⚠️';
+          : inc.type === 'JAM' ? '🚦'
+          : inc.type === 'FLOODING' ? '🌊'
+          : inc.type === 'HIGH_WINDS' ? '🌬️'
+          : inc.type === 'ROAD_WORKS' ? '👷'
+          : '⚠️';
         const icon = L.divIcon({
           className: '',
           iconSize: [24, 24],
@@ -320,7 +320,7 @@ function RouteMap({ alternatives, primaryWaypoints, primaryGeometryEncoded, orig
 function CurrentRouteCard({ currentRoute, isScored }) {
   if (!currentRoute) return null;
   const etaHrs = ((currentRoute.eta ?? 0) / 3600).toFixed(1);
-  const level = currentRoute.risk_level ?? 'unknown';
+  const level  = currentRoute.risk_level ?? 'unknown';
 
   return (
     <motion.div
@@ -380,11 +380,11 @@ function StatRow({ icon: Icon, label, children }) {
 }
 
 function RouteCard({ alt, isScoring, index, onHover }) {
-  const meta = ROUTE_META[alt.label] ?? ROUTE_META.Avoidance;
-  const Icon = meta.icon;
+  const meta   = ROUTE_META[alt.label] ?? ROUTE_META.Avoidance;
+  const Icon   = meta.icon;
   const etaHrs = ((alt.eta ?? alt.duration_seconds ?? 0) / 3600).toFixed(1);
   const hasRisk = alt.risk_assessed;
-  const isRec = alt.label === 'Recommended';
+  const isRec  = alt.label === 'Recommended';
 
   return (
     <motion.div
@@ -532,15 +532,15 @@ const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
   const shipment = useShipmentStore(
     state => state.shipments.find(s => s.id === shipmentId)
   );
-  const primaryWaypoints = shipment?.route_waypoints;
+  const primaryWaypoints       = shipment?.route_waypoints;
   const primaryGeometryEncoded = shipment?.route_geometry_encoded;
-  const originCoords = shipment?.origin_coords;
-  const destCoords = shipment?.destination_coords;
-  const routeIncidents = shipment?.route_incidents ?? [];
+  const originCoords           = shipment?.origin_coords;
+  const destCoords             = shipment?.destination_coords;
+  const routeIncidents         = shipment?.route_incidents ?? [];
 
   const alternatives = scoredAlts ?? data?.alternatives ?? [];
-  const isScoring = scoreMutation.isPending;
-  const isScored = !!scoredAlts;
+  const isScoring    = scoreMutation.isPending;
+  const isScored     = !!scoredAlts;
 
   useEffect(() => { setScoredAlts(null); }, [shipmentId]);
 
@@ -700,8 +700,8 @@ const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
                   <div className={cn(
                     'grid gap-3',
                     alternatives.length <= 2 ? 'md:grid-cols-2' :
-                      alternatives.length === 4 ? 'md:grid-cols-4' :
-                        'md:grid-cols-3'
+                    alternatives.length === 4 ? 'md:grid-cols-4' :
+                    'md:grid-cols-3'
                   )}>
                     {alternatives.map((alt, i) => (
                       <RouteCard

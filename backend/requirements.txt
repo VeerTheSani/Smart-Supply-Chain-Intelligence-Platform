@@ -4,7 +4,7 @@ uvicorn[standard]==0.42.0
 
 # MongoDB async driver
 motor==3.7.1
-pymongo==4.8.0
+pymongo==4.16.0
 
 # Data validation
 pydantic==2.12.5

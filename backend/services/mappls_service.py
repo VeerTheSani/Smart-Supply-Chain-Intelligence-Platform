@@ -1,7 +1,5 @@
 # services/mappls_service.py
-# Replaces both geocoding_service.py and ors_service.py
 # Uses Mappls (MapmyIndia) for:
-#   - Geocoding (place name → coordinates)
 #   - Routing (coordinates → waypoints every 50km)
 #   - Real-time traffic (duration with traffic vs without)
 
@@ -199,6 +197,7 @@ async def get_route(
 
     result = {
         "waypoints":                   _extract_waypoints_every_50km(coordinates),
+        "geometry_encoded":            primary.get("geometry", ""),
         "distance_km":                 round(primary.get("distance", 0) / 1000, 2),
         "duration_seconds":            duration_with,
         "duration_no_traffic_seconds": duration_no_traffic,
@@ -290,6 +289,7 @@ def _compute_via_point(origin: dict, dest: dict, position: float, offset_km: flo
     lat_mid = (origin["lat"] + dest["lat"]) / 2.0
     cos_lat = math.cos(math.radians(lat_mid))
 
+    # Work in km-equivalent units so the direction vector is metrically correct
     dlat_km = (dest["lat"] - origin["lat"]) * 111.0
     dlng_km = (dest["lng"] - origin["lng"]) * 111.0 * cos_lat
     length   = math.sqrt(dlat_km ** 2 + dlng_km ** 2)
@@ -298,10 +298,12 @@ def _compute_via_point(origin: dict, dest: dict, position: float, offset_km: flo
 
     dlat_n = dlat_km / length
     dlng_n = dlng_km / length
+    # Right-perpendicular in metric space (90° clockwise: (x,y) → (y,-x))
     perp_lat_n =  dlng_n
     perp_lng_n = -dlat_n
 
     sign = 1 if offset_km >= 0 else -1
+    # Convert metric unit-vector back to degree offsets
     lat_shift = perp_lat_n * abs(offset_km) / 111.0
     lng_shift = perp_lng_n * abs(offset_km) / (111.0 * cos_lat) if cos_lat > 0 else 0.0
     return {
@@ -313,13 +315,19 @@ def _compute_via_point(origin: dict, dest: dict, position: float, offset_km: flo
 def _compute_three_via_points(origin: dict, dest: dict) -> tuple:
     """
     Return three via-points that force genuinely different road corridors.
+
+    For a Delhi→Mumbai-style SW route:
+      via_a — midpoint, pushed LEFT  (west corridor, e.g. Gujarat coast)
+      via_b — midpoint, pushed RIGHT (east corridor, e.g. Nagpur/Deccan)
+      via_c — 35% along route, pushed RIGHT further (forces divergence early)
+    All offsets are capped so the via-point stays inside India / reachable road network.
     """
     route_dist_km = _haversine_km(origin["lat"], origin["lng"], dest["lat"], dest["lng"])
     base_offset   = max(100, min(250, route_dist_km * 0.18))
 
-    via_a = _compute_via_point(origin, dest, 0.50, -base_offset)
-    via_b = _compute_via_point(origin, dest, 0.50,  base_offset * 1.10)
-    via_c = _compute_via_point(origin, dest, 0.35,  base_offset * 1.40)
+    via_a = _compute_via_point(origin, dest, 0.50, -base_offset)           # left mid
+    via_b = _compute_via_point(origin, dest, 0.50,  base_offset * 1.10)    # right mid
+    via_c = _compute_via_point(origin, dest, 0.35,  base_offset * 1.40)    # right, earlier
     return via_a, via_b, via_c
 
 
@@ -386,7 +394,7 @@ async def get_route_alternatives(
         _fetch_via(via_c),
     )
 
-    valid  = [r for r in results if isinstance(r, dict)]
+    valid = [r for r in results if isinstance(r, dict)]
     failed = len(results) - len(valid)
     if failed:
         logger.warning(f"{failed}/3 corridor route(s) failed, got {len(valid)} valid")
@@ -409,8 +417,8 @@ async def get_route_through(
     Used by the avoidance route logic in reroute_engine.
     Returns same dict shape as get_route_alternatives entries, or None on failure.
     """
-    token     = await get_token()
-    vias      = via_coords if isinstance(via_coords, list) else [via_coords]
+    token = await get_token()
+    vias = via_coords if isinstance(via_coords, list) else [via_coords]
     via_parts = ";".join(f"{v['lng']},{v['lat']}" for v in vias)
     coords_str = (
         f"{origin_coords['lng']},{origin_coords['lat']};"
@@ -456,7 +464,7 @@ async def get_route_through(
     }
 
 
-# ── Self test ──────────────────────────────────────────────────────────────────
+## testing this garbage if its any good or another loose
 
 if __name__ == "__main__":
     import asyncio

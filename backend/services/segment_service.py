@@ -1,7 +1,7 @@
 # services/segment_service.py
 # Reverse geocodes each waypoint to get the actual city/town name.
 # Called once at shipment creation — results stored in MongoDB.
-# Provides real place names for route analysis.
+# Gives Gemini real place names instead of random coordinates.
 
 import httpx
 import asyncio
@@ -12,46 +12,6 @@ logger = logging.getLogger(__name__)
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
 HEADERS = {"User-Agent": "SmartSupplyChain/1.0"}
 
-
-async def _reverse_geocode(lat: float, lng: float) -> str:
-    """
-    Convert a coordinate to the nearest city/town name.
-    Returns city name string, or None on failure.
-    """
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                NOMINATIM_URL,
-                params={
-                    "lat": lat,
-                    "lon": lng,
-                    "format": "json",
-                    "zoom": 7,
-                    "addressdetails": 1,
-                },
-                headers=HEADERS,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-
-        address = data.get("address", {})
-
-        # Fallback chain: try progressively broader location names
-        name = (
-           address.get("city") or
-           address.get("town") or
-           address.get("suburb") or
-           address.get("district") or
-           address.get("village") or
-           address.get("county") or
-           address.get("state_district") or
-           data.get("display_name", "").split(",")[0]
-        )
-        return name.strip() if name else None
-
-    except Exception as e:
-        logger.warning(f"Reverse geocode failed for ({lat}, {lng}): {e}")
-        return None
 
 
 async def get_named_waypoints(waypoints: list[dict]) -> list[dict]:
@@ -69,11 +29,9 @@ async def get_named_waypoints(waypoints: list[dict]) -> list[dict]:
         return {**wp, "city": city or f"{wp['lat']:.2f},{wp['lng']:.2f}"}
 
     results = await asyncio.gather(*[
-        enrich(wp, delay=i * 0.5)   # 0.5s stagger to respect Nominatim rate limits
+        enrich(wp, delay=i * 0.5)   # 0.5s between each call ebcause this stupid nomiantion is hititng god damn limit 
         for i, wp in enumerate(waypoints)
     ])
-
-    return list(results)
 
 
 def get_city_names(named_waypoints: list[dict]) -> list[str]:

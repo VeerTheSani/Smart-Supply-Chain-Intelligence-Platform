@@ -1,15 +1,15 @@
 # routers/reroute.py
-# GET  /api/reroute/{id}        — fast path, returns 3 alternatives (traffic only)
-# POST /api/reroute/{id}/score  — slow path, full weather+traffic scoring on-demand
+# GET /api/reroute/{id}
+# Returns 3 alternative routes shaped for Nandani's RerouteModal component.
 #
-# Frontend (RerouteModal) expects:
+# Her frontend expects:
 #   data.reroute_suggested     → bool
 #   data.reason                → string
 #   data.recommended_route     → route_id like "A", "B", "C"
 #   data.current_route.eta     → seconds (used for timeSaved calc)
 #   data.alternatives[]        → each with:
-#       route_id               → "A", "B", "C", "D"
-#       type                   → "Fast but Risky", "Balanced", "Safe but Slow", "Incident Avoidance"
+#       route_id               → "A", "B", "C"
+#       type                   → "Fast but Risky", "Balanced", "Safe but Slow"
 #       risk_level             → lowercase "high"/"medium"/"low"
 #       risk_score             → number
 #       eta                    → seconds
@@ -31,7 +31,6 @@ from routers.reroute_engine import get_alternatives, score_alternatives_risk
 class ScoreRequest(BaseModel):
     alternatives: list[dict[str, Any]]
 
-
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/reroute", tags=["reroute"])
 
@@ -44,7 +43,7 @@ def _to_id(id: str) -> ObjectId:
 
 
 def _label_to_type(label: str) -> str:
-    """Convert internal labels to the type strings the UI shows."""
+    """Convert our internal labels to the type strings her UI shows."""
     mapping = {
         "Fastest":     "Fast but Risky",
         "Safest":      "Safe but Slow",
@@ -56,26 +55,27 @@ def _label_to_type(label: str) -> str:
 
 def _transform_for_frontend(result: dict, shipment: dict) -> dict:
     """
-    Transform reroute_engine output into the shape RerouteModal expects.
+    Transform our reroute_engine output into the shape RerouteModal expects.
     """
-    alternatives  = result.get("alternatives", [])
-    current_risk  = result.get("current_risk", 0)
+    alternatives = result.get("alternatives", [])
+    current_risk = result.get("current_risk", 0)
     current_level = result.get("current_level", "unknown")
 
+    # Assign A/B/C route IDs in order: Recommended→A, Fastest→B, Safest→C
     label_order = ["Recommended", "Fastest", "Safest", "Avoidance"]
-    route_ids   = ["A", "B", "C", "D"]
+    route_ids = ["A", "B", "C", "D"]
 
     transformed_alts = []
-    recommended_route = "A"
+    recommended_route = "A"  # default
 
-    for i, alt in enumerate(alternatives[:4]):
+    for i, alt in enumerate(alternatives[:3]):
         label    = alt.get("label", label_order[i] if i < len(label_order) else f"Route {i+1}")
         route_id = route_ids[i] if i < len(route_ids) else str(i + 1)
 
         if label == "Recommended":
             recommended_route = route_id
 
-        dur  = alt.get("duration_seconds", 0)
+        dur = alt.get("duration_seconds", 0)
         dist = alt.get("distance_km", 0)
         transformed_alts.append({
             "route_id":          route_id,
@@ -98,6 +98,7 @@ def _transform_for_frontend(result: dict, shipment: dict) -> dict:
             "is_avoidance":      alt.get("is_avoidance", False),
         })
 
+    # Determine if reroute is actually suggested
     reroute_suggested = current_level.upper() in ("HIGH", "CRITICAL")
 
     reason = (
@@ -107,6 +108,7 @@ def _transform_for_frontend(result: dict, shipment: dict) -> dict:
         f"Route {recommended_route} provides the optimal balance of safety and speed."
     )
 
+    # current_route.eta — use shipment's expected_travel_seconds
     current_eta = shipment.get("expected_travel_seconds", 0) or 0
 
     return {
@@ -132,9 +134,6 @@ async def get_reroute(id: str):
 
     if not shipment.get("destination_coords"):
         raise HTTPException(status_code=400, detail="Shipment missing destination coordinates")
-
-    if not shipment.get("route_waypoints"):
-        raise HTTPException(status_code=400, detail="Shipment has no route waypoints — route not computed yet")
 
     try:
         result = await get_alternatives(shipment)
