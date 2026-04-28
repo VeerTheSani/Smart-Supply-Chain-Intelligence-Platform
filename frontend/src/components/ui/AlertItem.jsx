@@ -71,12 +71,12 @@ const AlertItem = memo(function AlertItem({
       case 'risk_alert':
       case 'high_risk_alert':
       case 'critical_risk': return <AlertTriangle className="w-full h-full" />;
-      case 'cascade_alert':  return <Link2 className="w-full h-full" />;
-      case 'gps_stuck':      return <MapPin className="w-full h-full" />;
-      case 'api_failure':    return <Server className="w-full h-full" />;
+      case 'cascade_alert': return <Link2 className="w-full h-full" />;
+      case 'gps_stuck': return <MapPin className="w-full h-full" />;
+      case 'api_failure': return <Server className="w-full h-full" />;
       case 'reroute_executed': return <Truck className="w-full h-full" />;
       case 'simulator_scenario': return <Beaker className="w-full h-full" />;
-      default:               return <AlertCircle className="w-full h-full" />;
+      default: return <AlertCircle className="w-full h-full" />;
     }
   };
 
@@ -119,9 +119,18 @@ const AlertItem = memo(function AlertItem({
               {alert.source === 'REAL_SYSTEM' ? 'LIVE FEED' : 'SIMULATION'}
             </span>
           </div>
-          <span className="text-[9px] font-bold text-theme-secondary dark:text-slate-600 uppercase">
-            {formatTime(timestamp)}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] font-bold text-theme-secondary dark:text-slate-600 uppercase">
+              {formatTime(timestamp)}
+            </span>
+            <button
+              onClick={(e) => { e.stopPropagation(); onDismiss?.(id); }}
+              className="p-1 rounded-md text-theme-secondary hover:text-red-500 hover:bg-red-500/10 transition-colors"
+              aria-label="Dismiss alert"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
         </div>
 
         <div className="text-xs font-bold text-theme-primary dark:text-slate-200 line-clamp-2 leading-snug">
@@ -142,7 +151,7 @@ const AlertItem = memo(function AlertItem({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95 }}
       className={cn(
-        "p-4 transition-all cursor-pointer relative bg-theme-secondary dark:bg-[#0f172a] border-b border-theme dark:border-slate-800/50",
+        "p-4 transition-all cursor-pointer relative bg-theme-secondary dark:bg-[#0f172a] border-theme dark:border-slate-800/50",
         read ? "opacity-60" : "opacity-100",
         !read && severity === 'critical' && "bg-red-500/[0.02]",
         isSnoozed && "opacity-40"
@@ -155,7 +164,7 @@ const AlertItem = memo(function AlertItem({
           "w-10 h-10 rounded-xl flex items-center justify-center border shrink-0 shadow-sm transition-transform group-hover:scale-105",
           config.bg, config.color, config.border
         )}>
-           <div className="w-5 h-5">{getIconForType(type)}</div>
+          <div className="w-5 h-5">{getIconForType(type)}</div>
         </div>
 
         {/* Content */}
@@ -197,7 +206,7 @@ const AlertItem = memo(function AlertItem({
 
           {/* Integrated Location Detail */}
           {(type === 'gps_stuck' || locationName || coords) && (
-            <div 
+            <div
               onClick={handleViewOnMap}
               className="mb-3 p-3 rounded-xl bg-theme-tertiary dark:bg-slate-900/50 border border-theme dark:border-slate-800/80 shadow-sm group/loc hover:border-accent/40 transition-all"
             >
@@ -230,7 +239,7 @@ const AlertItem = memo(function AlertItem({
                 </span>
               )}
             </div>
-            
+
             <div className="flex items-center gap-1 relative">
               <button
                 onClick={(e) => { e.stopPropagation(); onFlag?.(id); }}
@@ -241,7 +250,7 @@ const AlertItem = memo(function AlertItem({
               >
                 <Star className={cn("w-4 h-4", flagged && "fill-current")} />
               </button>
-              
+
               <div className="relative">
                 <button
                   onClick={(e) => { e.stopPropagation(); setShowSnoozeMenu(!showSnoozeMenu); }}

@@ -8,6 +8,11 @@ export const useUIStore = create((set) => ({
   sidebarOpen: true,
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
 
+  // Mobile sidebar — overlay behavior, hidden by default
+  mobileSidebarOpen: false,
+  toggleMobileSidebar: () => set((state) => ({ mobileSidebarOpen: !state.mobileSidebarOpen })),
+  closeMobileSidebar: () => set({ mobileSidebarOpen: false }),
+
   notifications: [],
   addNotification: (notification) =>
     set((state) => ({

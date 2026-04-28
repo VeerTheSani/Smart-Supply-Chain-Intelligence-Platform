@@ -18,7 +18,7 @@ const apiClient = axios.create({
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${API_KEY}`,
   },
-  timeout: 45000,
+  timeout: 90000,
 });
 
 // Response interceptor — handle 401 globally

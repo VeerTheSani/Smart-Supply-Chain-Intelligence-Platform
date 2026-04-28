@@ -28,22 +28,22 @@ const StatCard = memo(function StatCard({ title, value, icon: Icon, trend, color
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay }}
-      className={`bg-theme-secondary rounded-2xl p-6 border-default shadow-md border-b-4 ${colorClass}`}
+      className={`bg-theme-secondary rounded-2xl p-4 sm:p-6 border-default shadow-md border-b-4 ${colorClass}`}
     >
-      <div className="flex justify-between items-start">
-        <div className="space-y-4">
-          <p className="text-theme-secondary text-sm font-semibold tracking-wider uppercase">{title}</p>
-          <div className="flex items-end gap-3">
-            <h3 className="text-4xl font-bold text-theme-primary tracking-tight">{value}</h3>
+      <div className="flex justify-between items-start gap-2">
+        <div className="space-y-2 sm:space-y-4 flex-1 min-w-0">
+          <p className="text-theme-secondary text-[10px] sm:text-sm font-semibold tracking-wider uppercase truncate">{title}</p>
+          <div className="flex items-end gap-1.5 sm:gap-3 flex-wrap">
+            <h3 className="text-2xl sm:text-3xl md:text-4xl font-bold text-theme-primary tracking-tight break-all">{value}</h3>
             {trend && (
-              <span className={`flex items-center gap-1 text-sm font-medium pb-1 ${trend > 0 ? 'text-success' : 'text-danger'}`}>
+              <span className={`flex items-center gap-1 text-[10px] sm:text-sm font-medium pb-1 ${trend > 0 ? 'text-success' : 'text-danger'}`}>
                 {trend > 0 ? '+' : ''}{trend}% <TrendingUp className="w-3 h-3" />
               </span>
             )}
           </div>
         </div>
-        <div className={`p-3 rounded-xl bg-theme-tertiary shadow-inner ${colorClass.replace('border-', 'text-')}`}>
-          <Icon className="w-6 h-6" />
+        <div className={`p-2 sm:p-3 rounded-xl bg-theme-tertiary shadow-inner shrink-0 ${colorClass.replace('border-', 'text-')}`}>
+          <Icon className="w-4 h-4 sm:w-6 sm:h-6" />
         </div>
       </div>
     </motion.div>
@@ -95,7 +95,7 @@ const getMarkerIcon = (risk, isSelected, theme) => {
 const getIncidentIcon = (type) => {
   const color =
     ["ROAD_CLOSED", "ACCIDENT"].includes(type) ? "#ef4444" :
-    ["JAM", "ROAD_WORKS"].includes(type) ? "#f97316" : "#facc15";
+      ["JAM", "ROAD_WORKS"].includes(type) ? "#f97316" : "#facc15";
   return new L.DivIcon({
     className: "",
     iconSize: [22, 22],
@@ -131,12 +131,12 @@ import polyline from '@mapbox/polyline';
 
 const AnimatedLiveTruck = memo(function AnimatedLiveTruck({ shipment, isSelected, theme, riskLevel, isHigh, isMed, etaDelay, delayClass, onClick }) {
   const [liveLocation, setLiveLocation] = useState(null);
-  
+
   useEffect(() => {
     // If no geometry is available, fall back to default backend location snap
     const defaultLoc = shipment.current_location && [shipment.current_location.lat, shipment.current_location.lng];
     if (!shipment?.created_at || !shipment?.expected_travel_seconds || !shipment.route_geometry_encoded) {
-      setLiveLocation(defaultLoc || [0,0]);
+      setLiveLocation(defaultLoc || [0, 0]);
       return;
     }
 
@@ -144,12 +144,12 @@ const AnimatedLiveTruck = memo(function AnimatedLiveTruck({ shipment, isSelected
     try {
       positions = polyline.decode(shipment.route_geometry_encoded); // [[lat, lng], ...]
     } catch {
-      setLiveLocation(defaultLoc || [0,0]);
+      setLiveLocation(defaultLoc || [0, 0]);
       return;
     }
-    
+
     if (positions.length < 2) {
-      setLiveLocation(defaultLoc || [0,0]);
+      setLiveLocation(defaultLoc || [0, 0]);
       return;
     }
 
@@ -160,34 +160,34 @@ const AnimatedLiveTruck = memo(function AnimatedLiveTruck({ shipment, isSelected
       let totalDist = 0;
       const dists = [];
       for (let i = 0; i < positions.length - 1; i++) {
-         const dx = positions[i+1][1] - positions[i][1];
-         const dy = positions[i+1][0] - positions[i][0];
-         const d = Math.sqrt(dx*dx + dy*dy);
-         dists.push(d);
-         totalDist += d;
+        const dx = positions[i + 1][1] - positions[i][1];
+        const dy = positions[i + 1][0] - positions[i][0];
+        const d = Math.sqrt(dx * dx + dy * dy);
+        dists.push(d);
+        totalDist += d;
       }
       const targetDist = totalDist * progressFrac;
       let currDist = 0;
       for (let i = 0; i < positions.length - 1; i++) {
-         if (currDist + dists[i] >= targetDist) {
-            const segmentFrac = dists[i] === 0 ? 0 : (targetDist - currDist) / dists[i];
-            const lat = positions[i][0] + (positions[i+1][0] - positions[i][0]) * segmentFrac;
-            const lng = positions[i][1] + (positions[i+1][1] - positions[i][1]) * segmentFrac;
-            return [lat, lng];
-         }
-         currDist += dists[i];
+        if (currDist + dists[i] >= targetDist) {
+          const segmentFrac = dists[i] === 0 ? 0 : (targetDist - currDist) / dists[i];
+          const lat = positions[i][0] + (positions[i + 1][0] - positions[i][0]) * segmentFrac;
+          const lng = positions[i][1] + (positions[i + 1][1] - positions[i][1]) * segmentFrac;
+          return [lat, lng];
+        }
+        currDist += dists[i];
       }
       return positions[positions.length - 1];
     };
 
     const updatePosition = () => {
       if (shipment.status === 'planned') {
-         setLiveLocation(getInterpolatedPoint(positions, 0));
-         return;
+        setLiveLocation(getInterpolatedPoint(positions, 0));
+        return;
       }
       if (shipment.status === 'delivered') {
-         setLiveLocation(getInterpolatedPoint(positions, 1));
-         return;
+        setLiveLocation(getInterpolatedPoint(positions, 1));
+        return;
       }
 
       // We rely on front-end mathematical geometry riding to perfectly stick to roads 60fps
@@ -242,10 +242,10 @@ const AnimatedLiveTruck = memo(function AnimatedLiveTruck({ shipment, isSelected
           </div>
           {shipment.risk?.current?.reason &&
             !shipment.risk.current.reason.toLowerCase().includes('unavailable') && (
-            <div className="bg-danger/10 mt-1 p-1 rounded border border-danger/20 text-danger text-[9px]">
-              ⚠️ {shipment.risk.current.reason}
-            </div>
-          )}
+              <div className="bg-danger/10 mt-1 p-1 rounded border border-danger/20 text-danger text-[9px]">
+                ⚠️ {shipment.risk.current.reason}
+              </div>
+            )}
         </div>
       </Popup>
     </Marker>
@@ -285,7 +285,7 @@ const Dashboard = memo(function Dashboard() {
             setIncidentOverride(prev => ({ ...prev, [s.id]: json.incidents }));
           }
         })
-        .catch(() => {})
+        .catch(() => { })
         .finally(() => setFetchingIncidents(n => Math.max(0, n - 1)));
     });
   }, [shipments]);
@@ -312,7 +312,7 @@ const Dashboard = memo(function Dashboard() {
         <motion.h1
           initial={{ opacity: 0, x: -10 }}
           animate={{ opacity: 1, x: 0 }}
-          className="text-3xl font-bold text-theme-primary tracking-tight"
+          className="text-xl sm:text-2xl md:text-3xl font-bold text-theme-primary tracking-tight"
         >
           Control Center
         </motion.h1>
@@ -324,7 +324,7 @@ const Dashboard = memo(function Dashboard() {
         </motion.p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
         <StatCard title="Total Shipments" value={data?.total_shipments || 0} icon={Package} trend={12} colorClass="border-theme" delay={0.1} />
         <StatCard title="Active Disruptions" value={data?.active_disruptions || 0} icon={AlertTriangle} colorClass={data?.active_disruptions > 0 ? 'border-primary-500' : 'border-success'} delay={0.2} />
         <StatCard title="Avg Risk Score" value={data?.avg_risk_score ? data.avg_risk_score.toFixed(1) : "0"} icon={Activity} trend={-5} colorClass={isLowRisk ? 'border-success' : 'border-warning'} delay={0.3} />
@@ -335,20 +335,20 @@ const Dashboard = memo(function Dashboard() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.6 }}
-        className="glass-panel rounded-3xl overflow-hidden border border-theme shadow-2xl flex flex-col"
+        className="glass-panel rounded-2xl md:rounded-3xl overflow-hidden border border-theme shadow-2xl flex flex-col"
       >
-        <div className="px-6 py-4 border-b border-theme bg-theme-secondary/30 flex justify-between items-center z-10 relative">
+        <div className="px-3 sm:px-4 md:px-6 py-3 md:py-4 border-b border-theme bg-theme-secondary/30 flex flex-wrap justify-between items-center z-10 relative gap-2">
           <h2 className="text-lg font-bold text-theme-primary flex items-center gap-2">
-            <Navigation className="w-5 h-5 text-accent" /> Live Shipment Tracking
+            <Navigation className="w-4 h-4 md:w-5 md:h-5 text-accent" /> <span className="text-sm md:text-lg">Live Shipment Tracking</span>
           </h2>
-          <div className="flex gap-4 text-[10px] uppercase font-bold tracking-widest bg-theme-primary/50 px-3 py-1.5 rounded-lg border border-theme">
+          <div className="hidden sm:flex gap-4 text-[10px] uppercase font-bold tracking-widest bg-theme-primary/50 px-3 py-1.5 rounded-lg border border-theme">
             <span className="flex items-center gap-1.5 text-success"><div className="w-2.5 h-2.5 rounded-full bg-success"></div> Safe</span>
             <span className="flex items-center gap-1.5 text-warning"><div className="w-2.5 h-2.5 rounded-full bg-warning"></div> Warning</span>
             <span className="flex items-center gap-1.5 text-danger"><div className="w-2.5 h-2.5 rounded-full bg-danger"></div> High Risk</span>
           </div>
         </div>
 
-        <div className="h-[400px] relative z-0">
+        <div className="h-[300px] sm:h-[350px] md:h-[400px] lg:h-[500px] relative z-0">
           <MapContainer
             center={window.innerWidth < 768 ? [20, 0] : [23, 72]}
             zoom={window.innerWidth < 768 ? 2 : 5}
@@ -392,15 +392,15 @@ const Dashboard = memo(function Dashboard() {
                   {shipment.via_points?.map((vp, idx) => {
                     if (!vp.coords?.lat || !vp.coords?.lng) return null;
                     return (
-                      <Marker 
+                      <Marker
                         key={`via-${shipment.id}-${idx}`}
                         position={[vp.coords.lat, vp.coords.lng]}
                         icon={getViaIcon(vp.type)}
                       >
-                        <Tooltip direction="top" offset={[0,-10]} opacity={1}>
-                           <div className="text-[11px] font-bold tracking-wide capitalize">
-                             <span className="opacity-70">{vp.type}:</span> {vp.location_name}
-                           </div>
+                        <Tooltip direction="top" offset={[0, -10]} opacity={1}>
+                          <div className="text-[11px] font-bold tracking-wide capitalize">
+                            <span className="opacity-70">{vp.type}:</span> {vp.location_name}
+                          </div>
                         </Tooltip>
                       </Marker>
                     );
@@ -408,46 +408,46 @@ const Dashboard = memo(function Dashboard() {
 
                   {/* Live Interpolating Autonomous Truck Marker */}
                   <AnimatedLiveTruck
-                     shipment={shipment}
-                     isSelected={isSelected}
-                     theme={theme}
-                     riskLevel={riskLevel}
-                     isHigh={isHigh}
-                     isMed={isMed}
-                     etaDelay={etaDelay}
-                     delayClass={delayClass}
-                     onClick={() => handleMarkerClick(shipment.id)}
+                    shipment={shipment}
+                    isSelected={isSelected}
+                    theme={theme}
+                    riskLevel={riskLevel}
+                    isHigh={isHigh}
+                    isMed={isMed}
+                    etaDelay={etaDelay}
+                    delayClass={delayClass}
+                    onClick={() => handleMarkerClick(shipment.id)}
                   />
 
                   {/* Incident markers — only for selected shipment */}
                   {isSelected && (shipment.route_incidents?.length > 0 ? shipment.route_incidents : (incidentOverride[shipment.id] || []))
                     .map((incident, idx) => (
-                    <Marker
-                      key={`incident-${shipment.id}-${idx}`}
-                      position={[incident.lat, incident.lng]}
-                      icon={getIncidentIcon(incident.type)}
-                    >
-                      <Popup>
-                        <div className="text-xs min-w-[140px]">
-                          <strong className="text-red-600 block mb-1">
-                            {incident.type.replace(/_/g, ' ')}
-                          </strong>
-                          <span className="text-gray-700">{incident.description}</span>
-                          <br />
-                          <span className="text-gray-400 text-[10px]">
-                            Severity: {SEVERITY_LABELS[incident.severity] || "Unknown"}
-                          </span>
-                        </div>
-                      </Popup>
-                    </Marker>
-                  ))}
+                      <Marker
+                        key={`incident-${shipment.id}-${idx}`}
+                        position={[incident.lat, incident.lng]}
+                        icon={getIncidentIcon(incident.type)}
+                      >
+                        <Popup>
+                          <div className="text-xs min-w-[140px]">
+                            <strong className="text-red-600 block mb-1">
+                              {incident.type.replace(/_/g, ' ')}
+                            </strong>
+                            <span className="text-gray-700">{incident.description}</span>
+                            <br />
+                            <span className="text-gray-400 text-[10px]">
+                              Severity: {SEVERITY_LABELS[incident.severity] || "Unknown"}
+                            </span>
+                          </div>
+                        </Popup>
+                      </Marker>
+                    ))}
                 </div>
               );
             })}
           </MapContainer>
 
           {/* Live summary overlay */}
-          <div className="absolute top-4 right-4 bg-theme-secondary/90 p-4 rounded-xl w-52 z-[1000] border border-theme text-xs shadow-lg">
+          <div className="absolute top-2 right-2 sm:top-4 sm:right-4 bg-theme-secondary/90 p-2 sm:p-4 rounded-lg sm:rounded-xl w-40 sm:w-52 z-[1000] border border-theme text-[10px] sm:text-xs shadow-lg">
             <h3 className="font-bold mb-2 text-theme-primary">Live Status</h3>
             {fetchingIncidents > 0 && (
               <div className="mb-2">

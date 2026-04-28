@@ -107,13 +107,13 @@ const EditShipmentModal = memo(function EditShipmentModal({ shipment, onClose })
             className="bg-theme-secondary rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl border border-theme flex flex-col max-h-[90vh]"
           >
             {/* Header */}
-            <div className="p-6 border-b border-theme flex items-center justify-between bg-theme-tertiary/30 shrink-0">
+            <div className="p-4 sm:p-6 border-b border-theme flex items-center justify-between bg-theme-tertiary/30 shrink-0">
               <div className="flex items-center gap-4">
                 <div className="p-2.5 bg-accent/20 rounded-xl border border-accent/30 shadow-inner">
                   <Edit2 className="w-5 h-5 text-accent" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-extrabold text-theme-primary tracking-tight">Edit Shipment</h2>
+                  <h2 className="text-lg sm:text-xl font-extrabold text-theme-primary tracking-tight">Edit Shipment</h2>
                   <p className="text-sm text-theme-secondary font-medium">
                     Tracking: <span className="font-mono text-theme-primary">{shipment.tracking_number}</span>
                   </p>
@@ -128,9 +128,9 @@ const EditShipmentModal = memo(function EditShipmentModal({ shipment, onClose })
             </div>
 
             {/* Scrollable body */}
-            <div className="p-8 overflow-y-auto">
+            <div className="p-4 sm:p-6 md:p-8 overflow-y-auto">
               {/* Route info strip */}
-              <div className="mb-6 border border-theme bg-theme-tertiary/50 p-4 rounded-xl flex items-center justify-between gap-4">
+              <div className="mb-6 border border-theme bg-theme-tertiary/50 p-3 sm:p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
                 <div className="flex items-center gap-3">
                   <Route className="w-5 h-5 text-theme-secondary shrink-0" />
                   <p className="text-theme-primary font-medium text-sm">

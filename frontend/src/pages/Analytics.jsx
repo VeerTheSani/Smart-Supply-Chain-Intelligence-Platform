@@ -109,20 +109,20 @@ const Analytics = memo(function Analytics() {
       <motion.div 
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
-        className="flex items-center justify-between"
+        className="flex flex-row items-center justify-between gap-2"
       >
-        <h1 className="text-2xl font-bold text-theme-primary flex items-center gap-2 tracking-tight">
-          <BarChart3 className="w-6 h-6 text-accent" />
+        <h1 className="text-xl sm:text-2xl font-bold text-theme-primary flex items-center gap-2.5 tracking-tight">
+          <BarChart3 className="w-6 h-6 sm:w-7 sm:h-7 text-accent" />
           Global Command Analytics
         </h1>
       </motion.div>
 
       {/* Top Value Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4">
         {[
-           { label: 'Total active Shipments', value: data?.total_shipments || 0, icon: Route, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+           { label: 'Active Shipments', value: data?.total_shipments || 0, icon: Route, color: 'text-blue-500', bg: 'bg-blue-500/10' },
            { label: 'Active Disruptions', value: data?.active_disruptions || 0, icon: ShieldAlert, color: 'text-red-500', bg: 'bg-red-500/10' },
-           { label: 'Average Risk Score', value: data?.avg_risk_score?.toFixed(1) || '0.0', icon: Activity, color: 'text-amber-500', bg: 'bg-amber-500/10' },
+           { label: 'Average Risk', value: data?.avg_risk_score?.toFixed(1) || '0.0', icon: Activity, color: 'text-amber-500', bg: 'bg-amber-500/10' },
            { label: 'Optimized Routes', value: data?.optimized_routes || 0, icon: Zap, color: 'text-green-500', bg: 'bg-green-500/10' },
         ].map((stat, i) => (
           <motion.div
@@ -130,14 +130,14 @@ const Analytics = memo(function Analytics() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.1 }}
-            className="bg-theme-secondary rounded-2xl border border-theme p-5 flex items-center gap-4 shadow-sm"
+            className="bg-theme-secondary rounded-2xl border border-theme p-3 sm:p-5 flex flex-col sm:flex-row items-center sm:items-center gap-2 sm:gap-4 shadow-sm text-center sm:text-left"
           >
-            <div className={`p-3 rounded-xl ${stat.bg}`}>
-               <stat.icon className={`w-6 h-6 ${stat.color}`} />
+            <div className={`p-2 sm:p-3 rounded-xl ${stat.bg} shrink-0`}>
+               <stat.icon className={`w-5 h-5 sm:w-6 sm:h-6 ${stat.color}`} />
             </div>
-            <div>
-               <p className="text-xs uppercase tracking-widest text-theme-secondary font-bold mb-1">{stat.label}</p>
-               <p className="text-2xl font-black text-theme-primary font-mono tracking-tight">{stat.value}</p>
+            <div className="min-w-0">
+               <p className="text-[9px] sm:text-xs uppercase tracking-widest text-theme-secondary font-bold mb-0.5 sm:mb-1 truncate w-full">{stat.label}</p>
+               <p className="text-lg sm:text-2xl font-black text-theme-primary font-mono tracking-tight">{stat.value}</p>
             </div>
           </motion.div>
         ))}
@@ -150,9 +150,9 @@ const Analytics = memo(function Analytics() {
         <motion.div 
            initial={{ opacity: 0, scale: 0.95 }}
            animate={{ opacity: 1, scale: 1 }}
-           className="lg:col-span-2 bg-theme-secondary border border-theme rounded-2xl p-6 shadow-sm flex flex-col"
+           className="lg:col-span-2 bg-theme-secondary border border-theme rounded-2xl p-4 sm:p-6 shadow-sm flex flex-col"
         >
-          <div className="mb-6 flex justify-between items-start">
+          <div className="mb-4 md:mb-6 flex flex-col sm:flex-row justify-between items-start gap-3">
             <div>
               <h3 className="text-sm font-black uppercase tracking-widest text-theme-primary flex items-center gap-2">
                 <Activity className="w-4 h-4 text-accent" />
@@ -181,9 +181,9 @@ const Analytics = memo(function Analytics() {
             </div>
           </div>
           
-           <div className="flex-1" style={{ minHeight: 350 }}>
+           <div className="flex-1 w-full" style={{ minHeight: 280 }}>
              {riskTrendData.length > 0 ? (
-               <ResponsiveContainer width="100%" height="100%" minWidth={0} aspect={2.5}>
+               <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                  <AreaChart data={riskTrendData}>
                    <defs>
                      <linearGradient id="colorRiskAvg" x1="0" y1="0" x2="0" y2="1">
@@ -201,10 +201,10 @@ const Analytics = memo(function Analytics() {
                      })}
                    </defs>
                    <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-theme-tertiary opacity-20" vertical={false} />
-                   <XAxis dataKey="time" stroke="currentColor" className="text-theme-secondary text-xs" tickLine={false} axisLine={false} />
-                   <YAxis stroke="currentColor" className="text-theme-secondary text-xs" tickLine={false} axisLine={false} domain={[0, 100]} />
+                   <XAxis dataKey="time" stroke="currentColor" className="text-theme-secondary text-[10px] sm:text-xs" tickLine={false} axisLine={false} dy={10} />
+                   <YAxis stroke="currentColor" className="text-theme-secondary text-[10px] sm:text-xs" tickLine={false} axisLine={false} domain={[0, 100]} dx={-5} />
                    <Tooltip content={<CustomTooltip />} />
-                   <Legend wrapperStyle={{ fontSize: '10px' }} iconType="circle" />
+                   <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '15px' }} iconType="circle" iconSize={8} />
                    
                    {viewMode === 'individual' ? (
                      shipmentKeysArray.map((key, index) => {
@@ -214,7 +214,7 @@ const Analytics = memo(function Analytics() {
                            key={key}
                            type="monotone" 
                            dataKey={key} 
-                           name={`Shipment ${key}`} 
+                           name={`SC-${key.slice(-6).toUpperCase()}`} 
                            stroke={color} 
                            strokeWidth={2.5} 
                            fillOpacity={1} 

@@ -8,7 +8,7 @@ const Settings = memo(function Settings() {
       <motion.h1
         initial={{ opacity: 0, x: -10 }}
         animate={{ opacity: 1, x: 0 }}
-        className="text-2xl font-bold text-theme-primary flex items-center gap-2"
+        className="text-lg sm:text-xl md:text-2xl font-bold text-theme-primary flex items-center gap-2"
       >
         <SettingsIcon className="w-6 h-6 text-theme-secondary" />
         System Configurations

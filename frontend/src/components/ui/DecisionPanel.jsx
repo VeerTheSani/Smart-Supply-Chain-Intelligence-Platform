@@ -40,17 +40,17 @@ const DecisionPanel = memo(function DecisionPanel({ shipmentId, onClose }) {
           initial={{ opacity: 0, scale: 0.95, y: 20 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 20 }}
-          className="bg-theme-secondary rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl border border-theme flex flex-col"
+          className="bg-theme-secondary rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl border border-theme flex flex-col"
         >
           {/* Header */}
-          <div className="p-6 border-b border-theme flex items-center justify-between bg-theme-tertiary/30">
+          <div className="p-4 sm:p-6 border-b border-theme flex items-center justify-between bg-theme-tertiary/30">
             <div className="flex items-center gap-4">
               <div className="p-2.5 bg-accent/20 rounded-xl border border-accent/30 shadow-inner">
                 <Navigation className="w-5 h-5 text-accent" />
               </div>
               <div>
-                <h2 className="text-xl font-extrabold text-theme-primary tracking-tight">System Reroute Interface</h2>
-                <p className="text-sm text-theme-secondary font-medium">Tracking Number: <span className="font-mono text-theme-primary">{shipment.tracking_number}</span></p>
+                <h2 className="text-lg sm:text-xl font-extrabold text-theme-primary tracking-tight">System Reroute Interface</h2>
+                <p className="text-xs sm:text-sm text-theme-secondary font-medium">Tracking Number: <span className="font-mono text-theme-primary">{shipment.tracking_number}</span></p>
               </div>
             </div>
             <button onClick={onClose} disabled={isSubmitting} className="p-2 text-theme-secondary hover:text-theme-primary transition-colors rounded-xl hover:bg-theme-tertiary cursor-pointer disabled:opacity-50">
@@ -58,7 +58,7 @@ const DecisionPanel = memo(function DecisionPanel({ shipmentId, onClose }) {
             </button>
           </div>
 
-          <div className="p-8">
+          <div className="p-4 sm:p-6 md:p-8">
             <div className="mb-6 space-y-3">
               <div className="bg-danger/5 border border-danger/20 p-4 rounded-xl flex items-start gap-4 shadow-sm shadow-danger/5">
                 <ShieldAlert className="w-5 h-5 shrink-0 text-danger mt-0.5" />

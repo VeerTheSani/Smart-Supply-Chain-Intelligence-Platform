@@ -29,9 +29,9 @@ const DEFAULT_PREFS = {
   // Auto-dismiss timing (seconds per severity)
   autoDismissTimings: {
     low: 3,
-    medium: 5,
-    high: 7,
-    critical: 10,
+    medium: 3,
+    high: 3,
+    critical: 3,
   },
 
   // Muted alert types (set of type strings)

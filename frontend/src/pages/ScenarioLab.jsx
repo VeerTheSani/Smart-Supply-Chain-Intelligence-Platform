@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   FlaskConical, Play, TrendingDown, ShieldCheck, Activity,
   Route, AlertTriangle, Timer, Check, X, Zap, Loader2,
-  Plus, Minus, Info, AlertCircle, Cpu, Radio, RefreshCw
+  Plus, Minus, Info, AlertCircle, Cpu, Radio, RefreshCw,
+  CheckCircle2, Circle as LucideCircle
 } from 'lucide-react';
 import { useShipments } from '../hooks/useShipments';
 import { useShipmentStore } from '../stores/shipmentStore';
@@ -81,6 +82,31 @@ function getAngle(from, to) {
   if (!from || !to) return 0;
   return (Math.atan2(to.lng - from.lng, to.lat - from.lat) * 180) / Math.PI;
 }
+
+/** Individual step in the simulation loading sequence */
+const LoadingStep = memo(({ label, active, completed }) => (
+  <div className={cn(
+    "flex items-center gap-3 transition-all duration-500",
+    active || completed ? "opacity-100 translate-x-0" : "opacity-30 -translate-x-2"
+  )}>
+    <div className="relative flex items-center justify-center">
+      {completed ? (
+        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+      ) : active ? (
+        <div className="w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+      ) : (
+        <LucideCircle className="w-4 h-4 text-theme-tertiary" />
+      )}
+    </div>
+    <span className={cn(
+      "text-[10px] font-bold tracking-tight",
+      completed ? "text-emerald-500" : active ? "text-theme-primary" : "text-theme-secondary"
+    )}>
+      {label}
+    </span>
+  </div>
+));
+LoadingStep.displayName = 'LoadingStep';
 
 // ─── Map sub-components ────────────────────────────────────────────────────────
 
@@ -208,6 +234,7 @@ const ScenarioLab = memo(function ScenarioLab() {
 
   // ── Simulation state ────────────────────────────────────────────────────────
   const [loading, setLoading] = useState(false);
+  const [loadStep, setLoadStep] = useState(0); // [0, 1, 2, 3]
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [runId, setRunId] = useState(null); // unique per simulation run
@@ -255,7 +282,7 @@ const ScenarioLab = memo(function ScenarioLab() {
         }
         return p + 0.0015; // Slow crawl — visual only
       });
-    }, 120);
+    }, 250);
 
     return () => clearInterval(truckAnimRef.current);
   }, [runId]); // Only restart animation when a new run begins
@@ -302,11 +329,16 @@ const ScenarioLab = memo(function ScenarioLab() {
       try {
         await apiClient.post('/api/scenario/accept', { simulation_id: simId });
         setDecided(true);
-        setExecStatus('auto_executed'); // ← now correctly set
+        setExecStatus('auto_executed');
         toast.success('Auto-rerouted — Countdown expired', { icon: '🤖' });
       } catch (e) {
-        toast.error(e.response?.data?.detail || 'Auto-reroute failed');
-        // Don't mark decided — let user retry manually
+        // If already executed by backend, just sync the UI state
+        if (e.response?.status === 400 && e.response?.data?.detail?.includes('already')) {
+          setDecided(true);
+          setExecStatus('auto_executed');
+        } else {
+          toast.error(e.response?.data?.detail || 'Auto-reroute failed');
+        }
       } finally {
         setDecisionLoading(false);
       }
@@ -354,10 +386,8 @@ const ScenarioLab = memo(function ScenarioLab() {
   const handleRun = async () => {
     if (!shipmentId || loading) return;
 
-    // BUG FIX #6: Reset everything BEFORE the run, not after
-    const newRunId = crypto.randomUUID();
-    setRunId(newRunId);
     setLoading(true);
+    setLoadStep(0);
     setResult(null);
     setError(null);
     setCountdown(0);
@@ -370,6 +400,14 @@ const ScenarioLab = memo(function ScenarioLab() {
     clearInterval(timerRef.current);
     clearInterval(truckAnimRef.current);
 
+    const newRunId = crypto.randomUUID();
+    setRunId(newRunId);
+
+    // Dynamic progress sequence
+    const stepTimer = setInterval(() => {
+      setLoadStep(s => (s < 3 ? s + 1 : s));
+    }, 300);
+
     try {
       const { data } = await apiClient.post('/api/scenario/run', {
         shipment_id: shipmentId,
@@ -377,7 +415,14 @@ const ScenarioLab = memo(function ScenarioLab() {
         severity,
       });
 
-      setResult(data);
+      clearInterval(stepTimer);
+      setLoadStep(4);
+      await new Promise(r => setTimeout(r, 100)); // UX delay to see complete state
+
+      setResult({
+        ...data,
+        loadingPreview: false
+      });
       setSimId(data.simulation_id);
 
       // Start countdown only for reroute decisions on HIGH/CRITICAL risk
@@ -389,12 +434,10 @@ const ScenarioLab = memo(function ScenarioLab() {
         setCountdown(data.decision.countdown);
         setCountdownActive(true);
       }
-
-      toast.success('Simulation complete', { icon: '⚡' });
     } catch (e) {
+      clearInterval(stepTimer);
       const msg = e.response?.data?.detail || e.message || 'Simulation failed';
       setError(msg);
-      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -446,11 +489,12 @@ const ScenarioLab = memo(function ScenarioLab() {
   }, [result, activeShipment]);
 
   // BUG FIX #7: Map visual state based on decision
-  const showOriginalRoute = result && (
-    !decided || execStatus === 'cancelled'
-  );
+  // We keep baseline visible as a "ghost" even after reroute is accepted
+  const showOriginalRoute = !!result;
   const showAiRoute = result && (
-    !decided || execStatus === 'accepted' || execStatus === 'auto_executed'
+    (result.decision?.action === 'reroute' && !decided) ||
+    execStatus === 'accepted' ||
+    execStatus === 'auto_executed'
   );
   const showDisruption = !!(result?.map?.disruption_zone?.lat) && !decided;
 
@@ -461,25 +505,25 @@ const ScenarioLab = memo(function ScenarioLab() {
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
-    <div className="h-[calc(100vh-100px)] flex flex-col gap-6 overflow-hidden">
+    <div className="min-h-[calc(100vh-100px)] lg:h-[calc(100vh-100px)] flex flex-col gap-4 md:gap-6 lg:overflow-hidden">
 
       {/* ── Header ── */}
-      <div className="flex items-center justify-between shrink-0">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shadow-sm">
-            <FlaskConical className="w-5 h-5" />
+          <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shadow-sm">
+            <FlaskConical className="w-4 h-4 md:w-5 md:h-5" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-theme-primary tracking-tight">Scenario Lab</h1>
-            <p className="text-[10px] font-bold text-theme-secondary uppercase tracking-[0.2em]">
+            <h1 className="text-lg md:text-xl font-bold text-theme-primary tracking-tight">Scenario Lab</h1>
+            <p className="text-[9px] font-bold text-theme-secondary uppercase tracking-[0.2em]">
               Predictive Logistics Simulation
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
           {/* Simulator isolation badge */}
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-theme-tertiary border border-theme text-[9px] font-black text-theme-secondary uppercase tracking-widest">
+          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-theme-tertiary border border-theme text-[9px] font-black text-theme-secondary uppercase tracking-widest">
             <Cpu className="w-3 h-3" />
             Isolated Simulator
           </div>
@@ -503,11 +547,11 @@ const ScenarioLab = memo(function ScenarioLab() {
         </div>
       </div>
 
-      {/* ── Main layout ── */}
-      <div className="flex-1 flex gap-6 min-h-0">
+      {/* ── Main layout — stacks on mobile, side-by-side on lg ── */}
+      <div className="flex-1 flex flex-col lg:flex-row gap-4 md:gap-6 min-h-0">
 
         {/* ── Left Sidebar ── */}
-        <div className="w-80 shrink-0 flex flex-col gap-4 overflow-y-auto custom-scrollbar pr-2">
+        <div className="w-full lg:w-80 shrink-0 flex flex-col gap-4 overflow-y-auto custom-scrollbar lg:pr-2">
 
           {/* Configuration panel */}
           <section className="bg-theme-secondary dark:bg-[#0f172a] border border-theme dark:border-slate-800 rounded-2xl p-5 shadow-sm">
@@ -601,19 +645,21 @@ const ScenarioLab = memo(function ScenarioLab() {
             </div>
           </section>
 
-          {/* Error display */}
+          {/* Integrated Error Display */}
           <AnimatePresence>
             {error && (
               <motion.div
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 flex items-start gap-3"
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="overflow-hidden"
               >
-                <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-1">Simulation Error</p>
-                  <p className="text-xs text-theme-primary">{error}</p>
+                <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center gap-3">
+                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-black text-red-500 uppercase tracking-widest">Simulation Failed</p>
+                    <p className="text-[10px] text-red-500/80 truncate">{error}</p>
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -705,7 +751,7 @@ const ScenarioLab = memo(function ScenarioLab() {
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
-                className="grid grid-cols-4 gap-4 shrink-0"
+                className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 shrink-0"
               >
                 <MetricCard
                   label="Latency Shift"
@@ -739,271 +785,50 @@ const ScenarioLab = memo(function ScenarioLab() {
             )}
           </AnimatePresence>
 
-          {/* Map */}
-          <div className="flex-1 relative bg-theme-secondary border border-theme dark:border-slate-800 rounded-2xl overflow-hidden shadow-inner">
-
-            {/* Loading overlay */}
-            {loading && (
-              <div className="absolute inset-0 z-[600] bg-theme-primary/70 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
-                <Loader2 className="w-10 h-10 text-accent animate-spin" />
-                <p className="text-theme-primary font-bold text-sm">Running Simulation…</p>
-                <p className="text-theme-secondary text-xs">Analysing risk · Generating alternate routes</p>
-              </div>
-            )}
-
-            {/* Simulator isolation watermark — rendered outside map, no Leaflet context needed */}
-            <div className="absolute top-4 left-4 z-[500] flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-theme-secondary/80 backdrop-blur-md border border-theme text-[9px] font-black text-theme-secondary uppercase tracking-widest pointer-events-none">
-              <Cpu className="w-3 h-3" />
-              SIMULATION ONLY
-            </div>
-
-            <MapContainer
-              key={`${theme}-${mapKey}`}
-              center={[20, 78]}
-              zoom={5}
-              // Fix: use inline style driven by ThemeContext `theme` variable instead of
-              // Tailwind dark: prefix — the dark: classes rely on a .dark class on <html>
-              // which may not match your custom ThemeContext, causing the map to always
-              // render with the dark invert filter even in light mode.
-              style={theme === 'dark'
-                ? { filter: 'invert(0.92) hue-rotate(180deg) grayscale(0.15)' }
-                : { filter: 'grayscale(0.15)' }
-              }
-              className="w-full h-full z-0"
-              zoomControl={false}
-            >
-              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-
-              {/* CustomZoom MUST be inside MapContainer — useMap() requires Leaflet context */}
-              <CustomZoom />
-
-              {/* FitBounds with runId instead of serialized points */}
-              <FitBounds points={fitPoints} runId={runId} />
-
-              {result && (
-                <>
-                  {/* BUG FIX #7: Conditional route rendering based on decision state */}
-                  {showOriginalRoute && (
-                    <Polyline
-                      positions={toPos(result.map?.original_route)}
-                      color="#94a3b8"
-                      weight={3}
-                      dashArray="5, 8"
-                      opacity={decided ? 0.3 : 0.6}
-                    />
-                  )}
-
-                  {showAiRoute && (
-                    <Polyline
-                      positions={toPos(result.map?.ai_route)}
-                      color={execStatus === 'accepted' || execStatus === 'auto_executed' ? '#10b981' : '#3b82f6'}
-                      weight={5}
-                      opacity={0.85}
-                    />
-                  )}
-
-                  {/* BUG FIX #2: SimulatedTruck uses interpolated position, NOT real location */}
-                  <SimulatedTruck
-                    position={simulatedTruckPos}
-                    prevPosition={prevTruckPos}
-                    shipmentName={activeShipment?.shipment_name}
-                    rerouted={execStatus === 'accepted' || execStatus === 'auto_executed'}
-                  />
-
-                  {/* Disruption zone — hidden after decision */}
-                  {showDisruption && (
-                    <Circle
-                      center={[result.map.disruption_zone.lat, result.map.disruption_zone.lng]}
-                      radius={15000}
-                      pathOptions={{
-                        color: '#ef4444',
-                        fillColor: '#ef4444',
-                        fillOpacity: 0.12,
-                        weight: 2,
-                        dashArray: '4, 6',
-                      }}
-                    />
-                  )}
-                </>
-              )}
-            </MapContainer>
-
-            {/* ── Decision overlay ── */}
-            <AnimatePresence>
-              {result && result.decision?.action === 'reroute' && !decided && countdownActive && (
-                <motion.div
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
-                  className="absolute bottom-6 right-6 w-[340px] z-[500]"
-                >
-                  <div className="bg-theme-secondary dark:bg-[#0f172a] border border-theme dark:border-slate-800 rounded-2xl overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.3)] backdrop-blur-xl">
-                    {/* Header */}
-                    <div className="px-5 py-4 bg-gradient-to-r from-accent/20 to-transparent border-b border-theme dark:border-slate-800/80 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Route className="w-4 h-4 text-accent" />
-                        <span className="text-[10px] font-black text-theme-primary uppercase tracking-[0.15em]">
-                          Decision Intel
-                        </span>
-                      </div>
-                      {countdown > 0 && (
-                        <div className="flex items-center gap-2 px-2 py-1 rounded-lg bg-red-500/10 border border-red-500/20">
-                          <Timer className="w-3.5 h-3.5 text-red-500 animate-pulse" />
-                          <span className="text-[11px] font-mono font-bold text-red-500">
-                            {countdown}s
-                          </span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Countdown progress bar */}
-                    <div className="h-1 bg-theme-tertiary">
-                      <motion.div
-                        className="h-full bg-red-500"
-                        animate={{ width: `${countdownPct}%` }}
-                        transition={{ duration: 0.5 }}
-                      />
-                    </div>
-
-                    <div className="p-5 space-y-4">
-                      <p className="text-[11px] font-bold text-theme-primary leading-snug">
-                        Autonomous System recommends{' '}
-                        <span className="text-accent underline decoration-accent/30 underline-offset-2">
-                          Active Rerouting
-                        </span>{' '}
-                        due to predicted risk cascade. Auto-executes at T-0.
-                      </p>
-
-                      <div className="grid grid-cols-2 gap-3 pt-1">
-                        <div className="p-2 rounded-xl bg-theme-tertiary dark:bg-slate-900 border border-theme dark:border-slate-800 text-center">
-                          <div className="text-[8px] font-black text-theme-secondary uppercase mb-1">Time Delta</div>
-                          <div className="text-xs font-bold text-theme-primary font-mono">
-                            {fmtDelay(result.impact?.delay_hours)}
-                          </div>
-                        </div>
-                        <div className="p-2 rounded-xl bg-theme-tertiary dark:bg-slate-900 border border-theme dark:border-slate-800 text-center">
-                          <div className="text-[8px] font-black text-theme-secondary uppercase mb-1">Reliability ↑</div>
-                          <div className="text-xs font-bold text-emerald-500 font-mono">+12.4%</div>
-                        </div>
-                      </div>
-
-                      <div className="flex gap-2 pt-1">
-                        <button
-                          onClick={handleAccept}
-                          disabled={decisionLoading}
-                          className="flex-1 py-2.5 rounded-xl bg-accent hover:bg-accent/90 text-white text-[10px] font-black uppercase tracking-widest shadow-lg shadow-accent/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
-                        >
-                          {decisionLoading
-                            ? <Loader2 className="w-3 h-3 animate-spin" />
-                            : <Check className="w-3 h-3" />}
-                          Accept Now
-                        </button>
-                        <button
-                          onClick={handleCancel}
-                          disabled={decisionLoading}
-                          className="flex-1 py-2.5 rounded-xl border border-theme text-theme-secondary hover:text-theme-primary hover:bg-theme-tertiary text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
-                        >
-                          <X className="w-3 h-3" />
-                          Dismiss
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Post-decision overlay */}
-            <AnimatePresence>
-              {decided && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="absolute bottom-6 right-6 z-[500]"
-                >
-                  <div className={cn(
-                    "px-5 py-3 rounded-xl border shadow-xl backdrop-blur-md flex items-center gap-3",
-                    STATUS_CONFIG[execStatus]?.cls
-                  )}>
-                    {execStatus === 'cancelled'
-                      ? <X className="w-4 h-4" />
-                      : <Check className="w-4 h-4" />}
-                    <div>
-                      <div className="text-[10px] font-black uppercase tracking-widest">
-                        {STATUS_CONFIG[execStatus]?.label}
-                      </div>
-                      <div className="text-[9px] opacity-70">
-                        {execStatus === 'cancelled'
-                          ? 'Original route maintained'
-                          : 'Optimized route applied — truck in transit'}
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Map legend */}
-            {result && (
-              <div className="absolute bottom-6 left-4 z-[500] flex flex-col gap-2">
-                <div className="bg-theme-secondary dark:bg-[#0f172a]/90 backdrop-blur-md border border-theme dark:border-slate-800 rounded-xl px-3 py-2 flex items-center gap-4 shadow-xl">
-                  {showOriginalRoute && (
-                    <div className="flex items-center gap-2">
-                      <div className="w-5 border-t-2 border-dashed border-slate-400/60" />
-                      <span className="text-[9px] font-bold text-theme-secondary uppercase tracking-widest">
-                        Baseline
-                      </span>
-                    </div>
-                  )}
-                  {showAiRoute && (
-                    <div className="flex items-center gap-2">
-                      <div className={cn(
-                        "w-5 h-1 rounded-full",
-                        execStatus === 'accepted' || execStatus === 'auto_executed'
-                          ? 'bg-emerald-500'
-                          : 'bg-blue-500'
-                      )} />
-                      <span className={cn(
-                        "text-[9px] font-bold uppercase tracking-widest",
-                        execStatus === 'accepted' || execStatus === 'auto_executed'
-                          ? 'text-emerald-500'
-                          : 'text-blue-500'
-                      )}>
-                        {execStatus === 'accepted' || execStatus === 'auto_executed'
-                          ? 'Active Route'
-                          : 'Simulated'}
-                      </span>
-                    </div>
-                  )}
-                  {showDisruption && (
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full border-2 border-red-500 bg-red-500/20" />
-                      <span className="text-[9px] font-bold text-red-500 uppercase tracking-widest">
-                        Disruption
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+          {/* Map Section - Isolated to prevent total page re-renders */}
+          <div className="flex-1 relative bg-theme-secondary border border-theme dark:border-slate-800 rounded-2xl overflow-hidden shadow-inner min-h-[450px] lg:min-h-0">
+            <SimulatorMap
+              theme={theme}
+              loading={loading}
+              result={result}
+              runId={runId}
+              fitPoints={fitPoints}
+              showOriginalRoute={showOriginalRoute}
+              showAiRoute={showAiRoute}
+              showDisruption={showDisruption}
+              decided={decided}
+              execStatus={execStatus}
+              simulatedTruckPos={simulatedTruckPos}
+              prevTruckPos={prevTruckPos}
+              activeShipment={activeShipment}
+              // Overlay props
+              countdown={countdown}
+              countdownActive={countdownActive}
+              countdownPct={countdownPct}
+              decisionLoading={decisionLoading}
+              handleAccept={handleAccept}
+              handleCancel={handleCancel}
+            />
           </div>
-        </div>
-      </div>
 
-      {/* ── Comparison Results ── */}
-      <AnimatePresence>
-        {result && !error && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="grid grid-cols-1 md:grid-cols-3 gap-4 shrink-0"
-          >
-            <ComparisonCard title="Human Baseline" data={result.comparison?.human} variant="neutral" />
-            <ComparisonCard title="AI Optimized" data={result.comparison?.ai} variant="accent" />
-            <ImpactSummaryCard impact={result.impact} />
-          </motion.div>
-        )}
-      </AnimatePresence>
+
+        </div>
+
+        {/* ── Comparison Results ── */}
+        <AnimatePresence>
+          {result && !error && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4 shrink-0"
+            >
+              <ComparisonCard title="Human Baseline" data={result.comparison?.human} variant="neutral" />
+              <ComparisonCard title="AI Optimized" data={result.comparison?.ai} variant="accent" />
+              <ImpactSummaryCard impact={result.impact} />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     </div>
   );
 });
@@ -1106,6 +931,180 @@ function ImpactSummaryCard({ impact }) {
       </div>
     </div>
   );
+}
+
+/**
+ * Isolated Map Component to prevent the heavy config UI from re-rendering during animations
+ */
+const SimulatorMap = memo(function SimulatorMap({
+  theme, loading, loadStep, result, runId, fitPoints, showOriginalRoute,
+  showAiRoute, showDisruption, decided, execStatus,
+  simulatedTruckPos, prevTruckPos, activeShipment,
+  countdown, countdownActive, countdownPct, decisionLoading,
+  handleAccept, handleCancel
+}) {
+  return (
+    <div className="w-full h-full relative" style={{ minHeight: '450px' }}>
+      {/* Enhanced Simulation Loading Overlay */}
+      <AnimatePresence>
+        {loading && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="absolute inset-0 z-[600] bg-theme-primary/80 backdrop-blur-md flex flex-col items-center justify-center p-6"
+          >
+            <div className="w-[300px] flex flex-col items-center">
+              <div className="relative mb-8">
+                <Loader2 className="w-12 h-12 text-accent animate-spin" />
+                <div className="absolute inset-0 bg-accent/20 blur-xl rounded-full" />
+              </div>
+
+              <div className="text-center mb-10">
+                <h3 className="text-[12px] font-black text-theme-primary uppercase tracking-[0.25em] mb-2">Deploying Scenario</h3>
+                <p className="text-[10px] text-theme-secondary font-medium tracking-wide">Establishing systemic connections</p>
+              </div>
+
+              <div className="w-full space-y-4">
+                <LoadingStep label="Cloning Shipment Digital Twin" active={loadStep === 0} completed={loadStep > 0} />
+                <LoadingStep label="Injecting Disruption Vectors" active={loadStep === 1} completed={loadStep > 1} />
+                <LoadingStep label="Executing AI Risk Engine" active={loadStep === 2} completed={loadStep > 2} />
+                <LoadingStep label="Generating Optimized Alternatives" active={loadStep === 3} completed={loadStep > 3} />
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Decision overlay */}
+      <AnimatePresence>
+        {result && result.decision?.action === 'reroute' && !decided && countdownActive && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}
+            className="absolute bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:w-[340px] z-[500]"
+          >
+            <div className="bg-theme-secondary border border-theme rounded-2xl overflow-hidden shadow-xl">
+              <div className="px-5 py-4 bg-theme-tertiary/50 border-b border-theme flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center">
+                    <Route className="w-4 h-4 text-accent" />
+                  </div>
+                  <span className="text-[10px] font-black text-theme-primary uppercase tracking-[0.2em]">Decision Intel</span>
+                </div>
+                {countdown > 0 && (
+                  <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-red-500/5 border border-red-500/20 shadow-inner">
+                    <Timer className="w-3.5 h-3.5 text-red-500 animate-pulse" />
+                    <span className="text-[11px] font-mono font-bold text-red-500 leading-none">{countdown}s</span>
+                  </div>
+                )}
+              </div>
+              <div className="h-1 bg-theme-tertiary">
+                <motion.div className="h-full bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.3)]" animate={{ width: `${countdownPct}%` }} transition={{ duration: 0.5 }} />
+              </div>
+              <div className="p-5 space-y-4">
+                <p className="text-[11px] font-bold text-theme-primary leading-relaxed opacity-90">
+                  Autonomous System recommends <span className="text-accent underline decoration-accent/30 underline-offset-4 font-black tracking-tight">Active Rerouting</span>.
+                </p>
+                <div className="flex gap-2.5">
+                  <button onClick={handleAccept} disabled={decisionLoading} className="flex-1 py-3.5 rounded-xl bg-accent hover:bg-accent/90 text-white text-[10px] font-black uppercase tracking-widest shadow-lg shadow-accent/20 active:scale-[0.96] transition-all flex items-center justify-center gap-2 cursor-pointer">
+                    {decisionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Accept Now
+                  </button>
+                  <button onClick={handleCancel} disabled={decisionLoading} className="flex-1 py-3.5 rounded-xl border border-theme hover:bg-theme-tertiary text-theme-secondary hover:text-theme-primary text-[10px] font-black uppercase tracking-widest transition-all active:scale-[0.96] cursor-pointer">
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Post-decision overlay */}
+      <AnimatePresence>
+        {decided && (
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="absolute bottom-6 right-6 z-[500]">
+            <div className={cn("px-6 py-3.5 rounded-2xl border shadow-2xl backdrop-blur-xl flex items-center gap-3.5", STATUS_CONFIG[execStatus]?.cls)}>
+              {execStatus === 'cancelled' ? <X className="w-4 h-4" /> : <Check className="w-4 h-4 shadow-sm" />}
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-[0.2em]">{STATUS_CONFIG[execStatus]?.label}</div>
+                <div className="text-[9px] opacity-70 font-medium">{execStatus === 'cancelled' ? 'Original route maintained' : 'Optimized route applied'}</div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Map legend - Solid theme background to match UI cards */}
+      {result && (
+        <div className="absolute top-5 left-4 z-[500]">
+          <div className="bg-theme-secondary border border-theme rounded-xl px-4 py-3 flex flex-col gap-3.5 shadow-xl">
+            {showOriginalRoute && (
+              <div className="flex items-center gap-3">
+                <div className="w-6 border-t-[3px] border-dashed border-slate-500/70" />
+                <span className="text-[9px] font-black text-theme-primary uppercase tracking-widest">Baseline</span>
+              </div>
+            )}
+            {showAiRoute && (
+              <div className="flex items-center gap-3">
+                <div className={cn(
+                  "w-5 h-1.5 rounded-full",
+                  execStatus === 'accepted' || execStatus === 'auto_executed' ? 'bg-emerald-500' : 'bg-blue-500'
+                )} />
+                <span className={cn(
+                  "text-[9px] font-black uppercase tracking-widest",
+                  execStatus === 'accepted' || execStatus === 'auto_executed' ? 'text-emerald-500' : 'text-blue-500'
+                )}>
+                  {execStatus === 'accepted' || execStatus === 'auto_executed' ? 'Active' : 'Simulated'}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <MapContainer
+        // key={`${theme}-${runId}`}
+        key={runId}
+        center={[20, 78]}
+        zoom={5}
+        style={{ height: '100%', width: '100%', minHeight: '450px' }}
+        className="z-0"
+        zoomControl={false}
+      >
+        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+        <MapInvalidator />
+        <CustomZoom />
+        <FitBounds points={fitPoints} runId={runId} />
+
+        {result && (
+          <>
+            {showOriginalRoute && (
+              <Polyline positions={toPos(result.map?.original_route)} color="#64748b" weight={4} dashArray="8, 12" opacity={decided ? 0.4 : 0.8} />
+            )}
+            {showAiRoute && (
+              <Polyline positions={toPos(result.map?.ai_route)} color={execStatus === 'accepted' || execStatus === 'auto_executed' ? '#10b981' : '#3b82f6'} weight={5} opacity={0.85} />
+            )}
+            <SimulatedTruck position={simulatedTruckPos} prevPosition={prevTruckPos} shipmentName={activeShipment?.shipment_name} rerouted={execStatus === 'accepted' || execStatus === 'auto_executed'} />
+            {showDisruption && (
+              <Circle center={[result.map.disruption_zone.lat, result.map.disruption_zone.lng]} radius={15000} pathOptions={{ color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.12, weight: 2, dashArray: '4, 6' }} />
+            )}
+          </>
+        )}
+      </MapContainer>
+    </div>
+  );
+});
+
+/**
+ * Ensures Leaflet detects the container size correctly even after CSS transitions
+ */
+function MapInvalidator() {
+  const map = useMap();
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [map]);
+  return null;
 }
 
 export default ScenarioLab;

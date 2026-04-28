@@ -15,13 +15,13 @@ const Routes = memo(function Routes() {
       <motion.h1
         initial={{ opacity: 0, x: -10 }}
         animate={{ opacity: 1, x: 0 }}
-        className="text-2xl font-bold text-theme-primary flex items-center gap-2"
+        className="text-lg sm:text-xl md:text-2xl font-bold text-theme-primary flex items-center gap-2"
       >
         <RouteIcon className="w-6 h-6 text-success" />
         Route Overviews
       </motion.h1>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
         {shipments?.length === 0 ? (
           <div className="bg-theme-secondary col-span-2 p-8 text-center text-theme-secondary rounded-xl border border-theme">No active route telemetry found.</div>
         ) : (

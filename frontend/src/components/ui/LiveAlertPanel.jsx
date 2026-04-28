@@ -112,16 +112,16 @@ const LiveAlertPanel = memo(function LiveAlertPanel() {
   if (!toastsEnabled && wsConnected) return null;
 
   return (
-    <div className="fixed bottom-6 right-6 max-w-[320px] z-[60] flex flex-col-reverse gap-3 pointer-events-none">
+    <div className="fixed top-3 right-3 sm:top-auto sm:bottom-6 sm:right-6 max-w-[calc(100vw-1.5rem)] sm:max-w-[320px] z-[60] flex flex-col gap-3 pointer-events-none">
       {/* Reconnection Alert */}
       {!wsConnected && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-[#1a1a1a] border border-red-500/30 text-red-400 px-4 py-2.5 rounded-xl flex items-center gap-3 backdrop-blur-xl shadow-lg pointer-events-auto"
+          className="bg-[#1a1a1a] border border-red-500/30 text-red-400 px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl flex items-center gap-2 sm:gap-3 backdrop-blur-xl shadow-lg pointer-events-auto"
         >
-          <WifiOff className="w-4 h-4 shrink-0" />
-          <span className="text-xs font-bold uppercase tracking-widest">Reconnecting...</span>
+          <WifiOff className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+          <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest">Reconnecting...</span>
         </motion.div>
       )}
 
@@ -141,31 +141,7 @@ const LiveAlertPanel = memo(function LiveAlertPanel() {
         </div>
       )}
 
-      {/* SIMULATOR ALERTS (2 max) */}
-      {toastsEnabled && filteredSim.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-theme-secondary dark:bg-[#0f172a]/90 border border-blue-500/30 rounded-2xl p-3 backdrop-blur-xl shadow-2xl pointer-events-auto border-l-4 border-l-blue-500"
-        >
-          <div className="flex items-center gap-2 text-[10px] font-black text-blue-500 uppercase tracking-widest px-1 mb-2">
-            <Beaker className="w-3.5 h-3.5" />
-            Scenario Lab Feed
-          </div>
-          <div className="flex flex-col-reverse gap-2">
-            <AnimatePresence mode="popLayout">
-              {filteredSim.slice(0, 2).map((alert) => (
-                <PopupAlert
-                  key={alert.id}
-                  alert={alert}
-                  onDismissPopup={dismissPopup}
-                  onMarkRead={markAlertAsRead}
-                />
-              ))}
-            </AnimatePresence>
-          </div>
-        </motion.div>
-      )}
+
     </div>
   );
 });

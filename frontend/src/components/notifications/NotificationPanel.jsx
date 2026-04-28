@@ -93,10 +93,10 @@ const NotificationPanel = memo(function NotificationPanel({ isOpen }) {
       initial={{ opacity: 0, y: 20, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 20, scale: 0.98 }}
-      className="absolute top-[calc(100%+16px)] right-0 w-[460px] max-h-[80vh] flex flex-col bg-theme-secondary dark:bg-[#0f172a] shadow-[0_20px_70px_-15px_rgba(0,0,0,0.5)] border border-theme dark:border-slate-800 rounded-2xl overflow-hidden z-[9999] origin-top-right backdrop-blur-2xl"
+      className="absolute top-[calc(100%+16px)] right-0 sm:right-0 w-[calc(100vw-2rem)] sm:w-[460px] max-h-[80vh] flex flex-col bg-theme-secondary dark:bg-[#0f172a] shadow-[0_20px_70px_-15px_rgba(0,0,0,0.5)] border border-theme dark:border-slate-800 rounded-2xl overflow-hidden z-[9999] origin-top-right backdrop-blur-2xl"
     >
       {/* ========== HEADER ========== */}
-      <div className="p-4 bg-white border-b border-gray-200 shrink-0">
+      <div className="p-4 border-b bg-theme-secondary border-theme shrink-0">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shadow-sm">
@@ -120,7 +120,7 @@ const NotificationPanel = memo(function NotificationPanel({ isOpen }) {
             {stats.unread > 0 && (
               <button
                 onClick={markAllAsRead}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white hover:bg-gray-100 text-gray-700 hover:text-accent transition-all border border-gray-200 text-[10px] font-bold uppercase tracking-tight"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-theme-secondary hover:bg-theme-tertiary text-theme-primary hover:text-accent transition-all border border-theme text-[10px] font-bold uppercase tracking-tight"
               >
                 <CheckCheck className="w-3.5 h-3.5" />
                 Clear All
@@ -131,7 +131,9 @@ const NotificationPanel = memo(function NotificationPanel({ isOpen }) {
               onClick={() => setShowSettings(!showSettings)}
               className={cn(
                 "p-2 rounded-lg transition-all",
-                showSettings ? "bg-accent/10 text-accent" : "text-theme-secondary hover:bg-theme-tertiary"
+                showSettings
+                  ? "bg-theme-secondary"
+                  : "bg-theme-secondary dark:bg-slate-950/20"
               )}
             >
               <Settings className="w-4 h-4" />
@@ -149,7 +151,7 @@ const NotificationPanel = memo(function NotificationPanel({ isOpen }) {
                 placeholder="Search shipment logs..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-4 py-2 text-xs bg-white border border-gray-200 rounded-xl text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent/30 transition-all"
+                className="w-full pl-9 pr-4 py-2 text-xs bg-theme-secondary border border-theme rounded-xl text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent/30 transition-all"
               />
             </div>
 
@@ -165,7 +167,7 @@ const NotificationPanel = memo(function NotificationPanel({ isOpen }) {
                   className={cn(
                     "flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
                     activeTab === tab.key
-                      ? "bg-white hover:bg-gray-100 text-accent shadow-sm border border-theme dark:border-slate-700"
+                      ? "bg-theme-secondary hover:bg-theme-tertiary text-accent shadow-sm border border-theme dark:border-slate-700"
                       : "text-theme-secondary dark:text-slate-500 hover:text-theme-primary"
                   )}
                 >
@@ -181,7 +183,7 @@ const NotificationPanel = memo(function NotificationPanel({ isOpen }) {
       </div>
 
       {/* ========== CONTENT ========== */}
-      <div className="overflow-y-auto flex-1 custom-scrollbar min-h-[300px] bg-theme-tertiary/10 dark:bg-slate-950/20">
+      <div className="overflow-y-auto flex-1 custom-scrollbar min-h-[300px] bg-theme-secondary dark:bg-slate-950/20">
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
@@ -254,7 +256,7 @@ const NotificationPanel = memo(function NotificationPanel({ isOpen }) {
 
 function SettingsView({ prefs }) {
   return (
-    <div className="p-6 space-y-8 bg-white text-gray-900">
+    <div className="p-6 space-y-8 bg-theme-secondary text-theme-primary">
       <div>
         <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-accent mb-4">Audio Feedback</h4>
         <div className="space-y-4">
@@ -276,7 +278,7 @@ function SettingsView({ prefs }) {
               )}
             >
               <div className={cn(
-                "absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-all shadow-sm",
+                "absolute top-0.5 w-3.5 h-3.5 rounded-full bg-theme-secondary transition-all shadow-sm",
                 prefs.soundEnabled ? "left-[22px]" : "left-0.5"
               )} />
             </button>
@@ -323,7 +325,7 @@ function SettingsView({ prefs }) {
               )}
             >
               <div className={cn(
-                "absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-all shadow-sm",
+                "absolute top-0.5 w-3.5 h-3.5 rounded-full bg-theme-secondary transition-all shadow-sm",
                 prefs.desktopEnabled ? "left-[22px]" : "left-0.5"
               )} />
             </button>
@@ -347,7 +349,7 @@ function SettingsView({ prefs }) {
               )}
             >
               <div className={cn(
-                "absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-all shadow-sm",
+                "absolute top-0.5 w-3.5 h-3.5 rounded-full bg-theme-secondary transition-all shadow-sm",
                 prefs.toastsEnabled ? "left-[22px]" : "left-0.5"
               )} />
             </button>

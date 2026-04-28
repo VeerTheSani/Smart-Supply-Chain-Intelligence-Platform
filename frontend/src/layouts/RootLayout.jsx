@@ -40,14 +40,27 @@ const RootLayout = memo(function RootLayout() {
       <Toaster position="top-right" />
       <LiveAlertPanel />
       <Sidebar />
-      <motion.div
-        initial={false}
-        animate={{ marginLeft: sidebarOpen ? 256 : 72 }}
-        transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-        className="flex flex-col min-h-screen"
+      <div
+        className="flex flex-col min-h-screen transition-[margin] duration-300 ease-out"
+        style={{ marginLeft: undefined }}
       >
+        {/* Desktop sidebar margin — animated via framer motion */}
+        <style>{`
+          @media (min-width: 768px) {
+            .sidebar-content-shift {
+              margin-left: ${sidebarOpen ? 256 : 72}px !important;
+              transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            }
+          }
+          @media (max-width: 767px) {
+            .sidebar-content-shift {
+              margin-left: 0 !important;
+            }
+          }
+        `}</style>
+        <div className="sidebar-content-shift flex flex-col min-h-screen">
         <Header />
-        <main className="flex-1 p-6">
+        <main className="flex-1 p-3 sm:p-4 md:p-6">
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
@@ -56,7 +69,8 @@ const RootLayout = memo(function RootLayout() {
             <Outlet />
           </motion.div>
         </main>
-      </motion.div>
+        </div>
+      </div>
 
       {/* Global Modals */}
       {selectedShipment && (

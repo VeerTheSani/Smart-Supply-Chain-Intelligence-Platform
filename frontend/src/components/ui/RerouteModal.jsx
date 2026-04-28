@@ -465,7 +465,7 @@ function CurrentRouteCard({ currentRoute, isScored }) {
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className="rounded-xl border border-theme bg-theme-tertiary/60 p-4 flex items-center justify-between gap-4"
+      className="rounded-xl border border-theme bg-theme-tertiary/60 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
     >
       <div className="flex items-center gap-3 min-w-0">
         <div className="w-8 h-8 rounded-lg bg-theme-tertiary/60 border border-theme flex items-center justify-center shrink-0">
@@ -477,25 +477,25 @@ function CurrentRouteCard({ currentRoute, isScored }) {
         </div>
       </div>
 
-      <div className="flex items-center gap-5 shrink-0">
-        <div className="text-center">
+      <div className="grid grid-cols-3 sm:flex sm:items-center gap-2 sm:gap-5 w-full sm:w-auto border-t sm:border-0 border-theme/30 pt-3 sm:pt-0">
+        <div className="text-center sm:text-left">
           <p className="text-[10px] text-theme-secondary uppercase tracking-wide">ETA</p>
-          <p className="text-sm font-bold text-theme-primary tabular-nums">{etaHrs}</p>
+          <p className="text-xs sm:text-sm font-bold text-theme-primary tabular-nums">{etaHrs}</p>
         </div>
-        <div className="text-center">
+        <div className="text-center sm:text-left">
           <p className="text-[10px] text-theme-secondary uppercase tracking-wide">Distance</p>
-          <p className="text-sm font-bold text-theme-primary tabular-nums">{currentRoute.distance?.toFixed(0) ?? '—'} km</p>
+          <p className="text-xs sm:text-sm font-bold text-theme-primary tabular-nums">{currentRoute.distance?.toFixed(0) ?? '—'} km</p>
         </div>
-        <div className="text-center">
+        <div className="text-center sm:text-left">
           <p className="text-[10px] text-theme-secondary uppercase tracking-wide">Risk</p>
-          <p className={cn('text-sm font-black tabular-nums', riskColor(level))}>
+          <p className={cn('text-xs sm:text-sm font-black tabular-nums', riskColor(level))}>
             {isScored
               ? `${currentRoute.risk_score?.toFixed(0) ?? '—'}/100`
               : level.toUpperCase()}
           </p>
         </div>
-        <div className="h-6 w-px bg-theme-tertiary/60" />
-        <div className="flex items-center gap-1.5 text-[10px] text-theme-secondary">
+        <div className="hidden sm:block h-6 w-px bg-theme-tertiary/60" />
+        <div className="hidden sm:flex items-center gap-1.5 text-[10px] text-theme-secondary">
           <div className="w-3 h-[2px] rounded bg-slate-500" style={{ backgroundImage: 'repeating-linear-gradient(90deg,#94a3b8 0,#94a3b8 4px,transparent 4px,transparent 9px)' }} />
           map
         </div>

@@ -92,17 +92,17 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             transition={{ duration: 0.2 }}
-            className="bg-theme-secondary rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl border border-theme flex flex-col relative"
+            className="bg-theme-secondary rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl border border-theme flex flex-col relative"
           >
             {/* Header */}
-            <div className="p-6 border-b border-theme flex items-center justify-between bg-theme-tertiary/30">
+            <div className="p-4 sm:p-6 border-b border-theme flex items-center justify-between bg-theme-tertiary/30">
               <div className="flex items-center gap-4">
                 <div className="p-2.5 bg-accent/20 rounded-xl border border-accent/30 shadow-inner">
                   <Package className="w-5 h-5 text-accent" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-extrabold text-theme-primary tracking-tight">Deploy New Shipment</h2>
-                  <p className="text-sm text-theme-secondary font-medium">Configure route and tracking parameters</p>
+                  <h2 className="text-lg sm:text-xl font-extrabold text-theme-primary tracking-tight">Deploy New Shipment</h2>
+                  <p className="text-xs sm:text-sm text-theme-secondary font-medium hidden sm:block">Configure route and tracking parameters</p>
                 </div>
               </div>
               <button
@@ -116,7 +116,7 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
             </div>
 
             {/* Body */}
-            <div className="p-8">
+            <div className="p-4 sm:p-6 md:p-8">
               <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
                 {/* Shipment Name */}
                 <div>
@@ -155,7 +155,7 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
 
                 {/* Via Points */}
                 {viaPoints.map((vp, index) => (
-                  <div key={index} className="flex items-start gap-2 bg-theme-tertiary/20 p-3 rounded-xl border border-theme">
+                  <div key={index} className="flex flex-wrap items-start gap-2 bg-theme-tertiary/20 p-3 rounded-xl border border-theme">
                      <div className="flex-1">
                         <LocationAutocomplete
                            placeholder={`Via Stop ${index + 1}...`}

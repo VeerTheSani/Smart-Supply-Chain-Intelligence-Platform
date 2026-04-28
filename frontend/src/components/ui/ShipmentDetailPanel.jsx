@@ -83,11 +83,11 @@ const ShipmentDetailPanel = memo(function ShipmentDetailPanel({ shipment, onClos
           animate={{ x: 0 }}
           exit={{ x: '100%' }}
           transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-          className="relative w-full max-w-lg bg-theme-secondary border-l border-theme shadow-2xl overflow-y-auto z-10 scrollbar-hide"
+          className="relative w-full sm:max-w-lg bg-theme-secondary border-l border-theme shadow-2xl overflow-y-auto z-10 scrollbar-hide"
         >
           {/* Header */}
           <div className="sticky top-0 z-20 bg-theme-secondary/95 backdrop-blur-md border-b border-theme">
-            <div className="flex items-center justify-between p-5">
+            <div className="flex items-center justify-between p-3 sm:p-5">
               <div className="flex items-center gap-3">
                 <div className={cn(
                   'p-3 rounded-2xl border shadow-inner transition-all',
@@ -103,7 +103,7 @@ const ShipmentDetailPanel = memo(function ShipmentDetailPanel({ shipment, onClos
                   )} />
                 </div>
                 <div>
-                  <h2 className="text-xl font-black text-theme-primary tracking-tight">
+                  <h2 className="text-lg sm:text-xl font-black text-theme-primary tracking-tight">
                     Shipment Intelligence
                   </h2>
                   <p className="text-[10px] text-theme-secondary font-black uppercase tracking-[0.2em] opacity-60">
@@ -120,7 +120,7 @@ const ShipmentDetailPanel = memo(function ShipmentDetailPanel({ shipment, onClos
             </div>
           </div>
 
-          <div className="p-5 space-y-4">
+          <div className="p-3 sm:p-5 space-y-4">
             {/* Countdown Bar — appears when auto-reroute is counting down */}
             <CountdownBar shipmentId={shipment.id} />
 
@@ -180,7 +180,7 @@ const ShipmentDetailPanel = memo(function ShipmentDetailPanel({ shipment, onClos
             </div>
 
             {/* Quick stats */}
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="glass-panel rounded-2xl border border-theme p-4 text-center bg-theme-tertiary/10">
                 <p className="text-[9px] text-theme-secondary uppercase tracking-[0.15em] font-black opacity-50">Status</p>
                 <p className="text-[11px] font-black text-theme-primary mt-2 uppercase tracking-widest">{shipment.status}</p>
