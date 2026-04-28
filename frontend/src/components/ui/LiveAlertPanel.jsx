@@ -1,6 +1,6 @@
 import React, { memo, useRef, useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { WifiOff } from 'lucide-react';
+import { WifiOff, Beaker } from 'lucide-react';
 import AlertItem from './AlertItem';
 import { useAlertStore } from '../../stores/alertStore';
 import { useNotificationPrefsStore } from '../../stores/notificationPrefsStore';
