@@ -85,7 +85,7 @@ Final Score = (Weather × 35%) + (Events × 25%) + (Traffic × 20%)
 | **Events** | 25% | TomTom Traffic | Live road incidents — accidents, closures, flooding, road works — matched to a 200m corridor around the route |
 | **Traffic** | 20% | Mappls | Real-time duration vs free-flow ratio (1.0x = clear, 2.0x+ = gridlock) |
 | **Time Buffer** | 15% | Calculated | How much of the journey has elapsed vs expected ETA (overdue = high risk) |
-| **Historical** | 5% | Gemini 2.5 Flash | AI-powered web search for strikes, protests, road closures along route cities |
+| **Major Incident/News** | 5% | Gemini 2.5 Flash | AI-powered web search for strikes, protests, road closures along route cities |
 
 **Risk Levels:** `LOW` (0–30) · `MEDIUM` (30–60) · `HIGH` (60–85) · `CRITICAL` (85–100)
 
