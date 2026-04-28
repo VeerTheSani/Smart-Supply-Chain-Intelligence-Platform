@@ -4,10 +4,10 @@
 # weather sampling along the full path.
 
 import httpx
-import math
 import os
 import logging
 from dotenv import load_dotenv
+from utils.geo import haversine_km as _haversine_km
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -17,15 +17,6 @@ ORS_URL = "https://api.openrouteservice.org/v2/directions/driving-car/geojson"
 WAYPOINT_INTERVAL_KM = 50
 
 
-def _haversine_km(lat1, lng1, lat2, lng2) -> float:
-    R = 6371
-    d_lat = math.radians(lat2 - lat1)
-    d_lng = math.radians(lng2 - lng1)
-    a = (math.sin(d_lat / 2) ** 2
-         + math.cos(math.radians(lat1))
-         * math.cos(math.radians(lat2))
-         * math.sin(d_lng / 2) ** 2)
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 def _extract_waypoints_every_50km(coordinates: list) -> list[dict]:

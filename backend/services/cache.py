@@ -87,14 +87,18 @@ traffic_cache = TTLCache(default_ttl_seconds=300, max_size=200)
 # Road disturbance Gemini calls — variable TTL (10 or 30 min), set at call site
 road_disturbance_cache = TTLCache(default_ttl_seconds=1800, max_size=100)
 
+# TomTom incidents — 5 minute TTL (same as scheduler recompute cycle)
+incidents_cache = TTLCache(default_ttl_seconds=300, max_size=200)
+
 
 def cleanup_all_caches():
     """Remove all expired entries from all caches. Called periodically by scheduler."""
-    before = weather_cache.size + traffic_cache.size + road_disturbance_cache.size
+    before = weather_cache.size + traffic_cache.size + road_disturbance_cache.size + incidents_cache.size
     weather_cache._cleanup_expired()
     traffic_cache._cleanup_expired()
     road_disturbance_cache._cleanup_expired()
-    after = weather_cache.size + traffic_cache.size + road_disturbance_cache.size
+    incidents_cache._cleanup_expired()
+    after = weather_cache.size + traffic_cache.size + road_disturbance_cache.size + incidents_cache.size
     if before > after:
         logger.debug(f"[CACHE_CLEANUP] evicted={before - after} remaining={after}")
 

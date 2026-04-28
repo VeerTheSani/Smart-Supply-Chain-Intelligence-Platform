@@ -234,7 +234,7 @@ If score < 40, safe_waypoint and incident_location must be empty strings."""
 
         if not combined_text:
             logger.warning("Gemini road disturbance: empty response")
-            return _mock_disturbance_fallback("unavailable")
+            return _disturbance_fallback("unavailable")
 
         import re
         json_match = re.search(r'\{.*\}', combined_text, re.DOTALL)

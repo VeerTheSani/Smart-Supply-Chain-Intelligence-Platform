@@ -209,7 +209,7 @@ export const useAlertStore = create((set, get) => ({
       set((state) => {
         const existingIds = new Set(state.allAlerts.map((a) => a.id));
         const newAlerts = docs
-          .map((doc) => normalizeAlert({ ...doc, id: doc._id }))
+          .map((doc) => normalizeAlert({ ...doc, id: doc.id || doc._id }))
           .filter((a) => a && !existingIds.has(a.id));
 
         if (newAlerts.length === 0) return state;

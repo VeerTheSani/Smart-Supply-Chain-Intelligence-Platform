@@ -11,6 +11,7 @@ class Coordinates(BaseModel):
 class ViaPoint(BaseModel):
     location_name: str = Field(..., min_length=1, max_length=200)
     type: Literal["pickup", "delivery", "custom"]
+    stop_duration_minutes: int = Field(0, ge=0)
     coords: Optional[Coordinates] = None
 
 

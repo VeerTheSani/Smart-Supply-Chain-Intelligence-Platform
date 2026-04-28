@@ -5,11 +5,11 @@
 # Returns structured breakdown with per-factor contribution.
 
 import logging
-import math
 import asyncio
 from datetime import datetime, timezone
 from typing import Optional
 
+from utils.geo import haversine_km as _haversine_km
 from services.weather_service import score_weather_along_route
 from services.mappls_service import get_route
 from services.gemini_service import get_road_disturbance_score
@@ -43,15 +43,7 @@ def _risk_level(score: float) -> str:
     return "CRITICAL"
 
 
-def _haversine_km(lat1, lng1, lat2, lng2) -> float:
-    R = 6371
-    d_lat = math.radians(lat2 - lat1)
-    d_lng = math.radians(lng2 - lng1)
-    a = (math.sin(d_lat / 2) ** 2
-         + math.cos(math.radians(lat1))
-         * math.cos(math.radians(lat2))
-         * math.sin(d_lng / 2) ** 2)
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+from utils.geo import haversine_km as _haversine_km
 
 
 # weathering 

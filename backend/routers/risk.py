@@ -38,8 +38,8 @@ async def get_risk(id: str):
             detail="Shipment has no route waypoints yet — route not computed"
         )
 
-    # Compute risk
-    assessment = await calculate_risk(shipment)
+    # Compute risk — skip Gemini to conserve quota; scheduler/creation handles Gemini calls
+    assessment = await calculate_risk({**shipment, "_skip_gemini": True})
 
     # Convert datetime to string for MongoDB storage
     assessment_to_store = {**assessment, "computed_at": assessment["computed_at"].isoformat()}

@@ -133,9 +133,35 @@ const ShipmentDetailPanel = memo(function ShipmentDetailPanel({ shipment, onClos
                 <div className="flex-1 min-w-0">
                   <p className="text-[9px] text-theme-secondary uppercase tracking-[0.2em] font-black opacity-50 mb-0.5">Origin Node</p>
                   <p className="text-sm text-theme-primary font-bold truncate tracking-tight">{shipment.origin || shipment.origin_name}</p>
+                  {departureDt && (
+                     <p className="text-[10px] font-mono text-blue-400 mt-1 uppercase tracking-wider font-bold">DEP: {departureDt.toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}</p>
+                  )}
                 </div>
               </div>
-              <div className="ml-4 border-l border-dashed border-theme h-6" />
+              {shipment.via_points?.map((vp, i) => (
+                <div key={i}>
+                  <div className="ml-4 border-l border-dashed border-theme h-10 flex flex-col justify-center gap-1">
+                    {vp.stop_duration_minutes > 0 && (
+                       <span className="ml-6 text-[10px] font-bold text-orange-500 dark:text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded-full flex items-center gap-1.5 border border-orange-500/20 shadow-sm shadow-orange-500/5 max-w-fit">
+                          <Clock className="w-3 h-3" /> {vp.stop_duration_minutes}m dwell
+                       </span>
+                    )}
+                  </div>
+                  <div className="flex items-start gap-4">
+                    <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center shrink-0 border border-blue-500/20">
+                      <MapPin className="w-4 h-4 text-blue-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[9px] text-theme-secondary uppercase tracking-[0.2em] font-black opacity-50 mb-0.5">Via Node • {vp.type}</p>
+                      <p className="text-sm text-theme-primary font-bold truncate tracking-tight">{vp.location_name}</p>
+                      {vp.eta_arrival && (
+                         <p className="text-[10px] font-mono text-green-400 mt-1 uppercase tracking-wider font-bold">ETA: {new Date(vp.eta_arrival).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <div className="ml-4 border-l border-dashed border-theme h-10" />
               <div className="flex items-start gap-4">
                 <div className="w-8 h-8 rounded-full bg-red-500/10 flex items-center justify-center shrink-0 border border-red-500/20">
                   <MapPin className="w-4 h-4 text-red-400" />
@@ -143,6 +169,12 @@ const ShipmentDetailPanel = memo(function ShipmentDetailPanel({ shipment, onClos
                 <div className="flex-1 min-w-0">
                   <p className="text-[9px] text-theme-secondary uppercase tracking-[0.2em] font-black opacity-50 mb-0.5">Target Destination</p>
                   <p className="text-sm text-theme-primary font-bold truncate tracking-tight">{shipment.destination || shipment.destination_name}</p>
+                  {departureDt && (
+                      <p className="text-[10px] font-mono text-green-400 mt-1 uppercase tracking-wider font-bold">
+                        ETA: {new Date(departureDt.getTime() + (parseFloat(shipment.eta_hours) || 0) * 3_600_000)
+                          .toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
+                      </p>
+                  )}
                 </div>
               </div>
             </div>

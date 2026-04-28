@@ -9,8 +9,9 @@ export const useShipments = () => {
   return useQuery({
     queryKey: ['shipments'],
     queryFn: fetchShipments,
-    staleTime: 5000, 
-    refetchInterval: 5000,
+    staleTime: 5000,
+    refetchInterval: 30000,
+    refetchIntervalInBackground: false,
   });
 };
 

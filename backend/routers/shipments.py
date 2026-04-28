@@ -37,7 +37,7 @@ def _serialize(doc: dict) -> dict:
     # Our backend stores:   origin_name, destination_name, shipment_name
     doc.setdefault("origin",      doc.get("origin_name", ""))
     doc.setdefault("destination", doc.get("destination_name", ""))
-    doc.setdefault("tracking_number", doc.get("shipment_name", doc.get("id", "")[:8].upper()))
+    doc.setdefault("tracking_number", f"SC-{doc.get('id', str(uuid.uuid4()))[:8].upper()}")
 
     # CRITICAL TIMEZONE FIX: MongoDB strips tzinfo. Force UTC so Javascript doesn't interpret it as local Indian Standard Time (+05:30 offset drift)
     for field in ["created_at", "updated_at"]:
@@ -102,7 +102,7 @@ async def _initial_risk_assessment(shipment_id, doc: dict):
         from routers.risk_engine import calculate_risk
         
         # STAGE 1: Fast assessment (Weather, Traffic, Time Buffer)
-        doc["_skip_gemini"] = True
+        doc = {**doc, "_skip_gemini": True}
         fast_assessment = await calculate_risk(doc)
         
         # Inject our loading reason explicitly into the cached frontend risk
@@ -118,7 +118,7 @@ async def _initial_risk_assessment(shipment_id, doc: dict):
         logger.info(f"Stage 1 initial assessment stored for {shipment_id}: {fast_assessment['risk_level']}")
         
         # STAGE 2: Deep assessment (Gemini AI Intel takes ~10-15 seconds)
-        doc["_skip_gemini"] = False
+        doc = {**doc, "_skip_gemini": False}
         final_assessment = await calculate_risk(doc)
         
         final_to_store = {**final_assessment, "computed_at": final_assessment["computed_at"].isoformat()}
@@ -179,6 +179,8 @@ async def create_shipment(data: ShipmentCreate, background_tasks: BackgroundTask
     distance_km          = None
     expected_travel_secs = None
     eta_hours            = None
+    leg_durations        = []
+    is_scaled            = False
 
     try:
         route = await get_route(origin_coords, dest_coords, via_coords_list=via_coords_list)
@@ -186,15 +188,19 @@ async def create_shipment(data: ShipmentCreate, background_tasks: BackgroundTask
         distance_km     = route["distance_km"]
         road_names      = route.get("road_names", [])
         geometry_encoded = route.get("geometry_encoded", "")
+        leg_durations    = route.get("leg_durations", [])
 
         duration_with    = route["duration_seconds"]
         duration_without = route.get("duration_no_traffic_seconds", duration_with)
+        
+        is_scaled = duration_with == duration_without
+        base_travel_secs = int(duration_with * 1.35) if is_scaled else duration_with
 
-        expected_travel_secs = int(duration_with * 1.35) if duration_with == duration_without else duration_with
+        # Add dwell times across all waypoints
+        total_stop_duration_secs = sum([vp.stop_duration_minutes * 60 for vp in (data.via_points or [])])
+        expected_travel_secs = base_travel_secs + total_stop_duration_secs
+        
         eta_hours = round(expected_travel_secs / 3600, 2)
-
-
-
     except RuntimeError as e:
         logger.warning(f"Route fetch failed for {data.origin_name}→{data.destination_name}: {e}")
 
@@ -220,6 +226,28 @@ async def create_shipment(data: ShipmentCreate, background_tasks: BackgroundTask
         except Exception as e:
             logger.warning(f"Could not fetch upstream shipment {data.upstream_shipment_id}: {e}")
 
+    # Compute ETA breakdowns for via points
+    cumulative_secs = 0
+    via_annotated = []
+    total_legs = len(via_geos) + 1 if via_geos else 1
+    fallback_leg_sec = int(expected_travel_secs / total_legs) if expected_travel_secs else 0
+
+    for i, (vp, vgeo) in enumerate(zip((data.via_points or []), via_geos)):
+        leg_sec = leg_durations[i] if i < len(leg_durations) else fallback_leg_sec
+        if is_scaled and i < len(leg_durations): leg_sec = int(leg_sec * 1.35)
+        
+        cumulative_secs += leg_sec
+        arrival_at_vp = now + timedelta(seconds=cumulative_secs)
+        cumulative_secs += vp.stop_duration_minutes * 60  # Dwell time
+        
+        via_annotated.append({
+            "location_name": vp.location_name,
+            "type": vp.type,
+            "stop_duration_minutes": vp.stop_duration_minutes,
+            "coords": {"lat": vgeo["lat"], "lng": vgeo["lng"]},
+            "eta_arrival": arrival_at_vp.isoformat(),
+        })
+
     doc = {
         # Core fields (your schema)
         "shipment_name":         data.shipment_name,
@@ -229,14 +257,7 @@ async def create_shipment(data: ShipmentCreate, background_tasks: BackgroundTask
         "destination_name":      data.destination_name,
         "destination_resolved":  dest_geo["display_name"],
         "destination_coords":    dest_coords,
-        "via_points": [
-            {
-                "location_name": vp.location_name,
-                "type": vp.type,
-                "coords": {"lat": vgeo["lat"], "lng": vgeo["lng"]}
-            }
-            for vp, vgeo in zip((data.via_points or []), via_geos)
-        ],
+        "via_points":            via_annotated,
         "route_geometry_encoded": geometry_encoded, 
 
         # Frontend compatibility fields (her schema)

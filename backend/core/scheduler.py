@@ -217,12 +217,20 @@ async def _countdown_and_reroute(shipment_id: str, shipment: dict, risk_level: s
         await asyncio.sleep(COUNTDOWN_SECONDS)
     except asyncio.CancelledError:
         _pending_countdowns.pop(shipment_id, None)
+        await db.decisions.update_one(
+            {"shipment_id": shipment_id, "status": "pending"},
+            {"$set": {"status": "cancelled"}},
+        )
         return
 
     _pending_countdowns.pop(shipment_id, None)
 
     fresh = await db.shipments.find_one({"_id": shipment["_id"]})
     if not fresh or fresh.get("status") == "delivered":
+        await db.decisions.update_one(
+            {"shipment_id": shipment_id, "status": "pending"},
+            {"$set": {"status": "cancelled"}},
+        )
         return
 
     fresh_level   = (fresh.get("last_risk_assessment") or {}).get("risk_level", "LOW")
@@ -231,6 +239,10 @@ async def _countdown_and_reroute(shipment_id: str, shipment: dict, risk_level: s
     if fresh_level not in ["HIGH", "CRITICAL"]:
         await countdown_manager.cancel_countdown(
             shipment_id, reason="Risk dropped — reroute not needed"
+        )
+        await db.decisions.update_one(
+            {"shipment_id": shipment_id, "status": "pending"},
+            {"$set": {"status": "cancelled"}},
         )
         return
 
@@ -241,6 +253,10 @@ async def _countdown_and_reroute(shipment_id: str, shipment: dict, risk_level: s
         reroute_data=reroute_data,
         success=reroute_data is not None,
         source="REAL_SYSTEM",
+    )
+    await db.decisions.update_one(
+        {"shipment_id": shipment_id, "status": "pending"},
+        {"$set": {"status": "executed"}},
     )
 
 
@@ -348,6 +364,17 @@ async def _process_shipment(shipment: dict):
     if new_location:
         shipment["current_location"] = new_location
 
+    # STEP 1a — Delivered transition: when GPS reaches the last waypoint
+    newly_delivered = False
+    waypoints = shipment.get("route_waypoints", [])
+    if (new_location
+            and waypoints
+            and shipment.get("status") not in ("delivered", "planned")):
+        last_wp = waypoints[-1]
+        if (abs(new_location["lat"] - last_wp["lat"]) < 0.0002
+                and abs(new_location["lng"] - last_wp["lng"]) < 0.0002):
+            newly_delivered = True
+
     # STEP 1b — GPS stuck detection (in_transit / rerouting shipments only)
     if new_location and shipment.get("status") in ("in_transit", "rerouting"):
         prev_gps = _gps_last_position.get(shipment_id)
@@ -416,10 +443,9 @@ async def _process_shipment(shipment: dict):
 
     use_gemini = _should_call_gemini(shipment, prev_level)
 
-    # Temporarily patch shipment to skip Gemini if TTL not reached
+    # Create a local copy so the MongoDB dict is never mutated
     if not use_gemini:
-        # Use cached event score from last assessment
-        shipment["_skip_gemini"] = True
+        shipment = {**shipment, "_skip_gemini": True}
 
     # STEP 3 — Calculate fresh risk
     try:
@@ -459,6 +485,10 @@ async def _process_shipment(shipment: dict):
         logger.warning(f"Weather API failure for {shipment_name}: {weather_reason}")
 
     hist_reason = breakdown.get("historical", {}).get("reason", "")
+    # Only fire Gemini failure alert when Gemini was actually attempted this cycle,
+    # not when we're reading back a stale "unavailable" from a prior failed call.
+    if not use_gemini and hist_reason.lower() in ("unavailable", "no road names available"):
+        hist_reason = ""  # suppress — stale cached result, not a live failure
     if hist_reason.lower() in ("unavailable", "no road names available") and \
             _should_notify_api_failure(shipment_id, "gemini", now):
         api_event = create_api_failure(
@@ -492,18 +522,31 @@ async def _process_shipment(shipment: dict):
 
     if new_level in ["HIGH", "CRITICAL"] and shipment.get("auto_reroute_enabled"):
         if shipment_id not in _pending_countdowns and prev_level not in ["HIGH", "CRITICAL"]:
-            # Fresh HIGH/CRITICAL escalation — start countdown
-            logger.info(f"Starting {COUNTDOWN_SECONDS}s countdown for {shipment_id} ({new_level})")
-            await countdown_manager.start_countdown(
-                shipment_id=shipment_id,
-                shipment_name=shipment_name,
-                shipment=shipment,
-                seconds=COUNTDOWN_SECONDS,
+            # Guard against duplicate decisions in MongoDB (durable across restarts)
+            existing_decision = await db.decisions.find_one(
+                {"shipment_id": shipment_id, "status": "pending"}
             )
-            task = asyncio.create_task(
-                _countdown_and_reroute(shipment_id, shipment, new_level)
-            )
-            _pending_countdowns[shipment_id] = task
+            if existing_decision:
+                logger.debug(f"Pending decision already in DB for {shipment_id}, skipping countdown")
+            else:
+                # Fresh HIGH/CRITICAL escalation — start countdown
+                logger.info(f"Starting {COUNTDOWN_SECONDS}s countdown for {shipment_id} ({new_level})")
+                await db.decisions.insert_one({
+                    "shipment_id": shipment_id,
+                    "status": "pending",
+                    "created_at": now,
+                    "expires_at": now + timedelta(seconds=COUNTDOWN_SECONDS),
+                })
+                await countdown_manager.start_countdown(
+                    shipment_id=shipment_id,
+                    shipment_name=shipment_name,
+                    shipment=shipment,
+                    seconds=COUNTDOWN_SECONDS,
+                )
+                task = asyncio.create_task(
+                    _countdown_and_reroute(shipment_id, shipment, new_level)
+                )
+                _pending_countdowns[shipment_id] = task
         else:
             logger.debug(f"Countdown already active or risk unchanged for {shipment_id}")
     elif new_level in ["LOW", "MEDIUM"] and shipment_id in _pending_countdowns:
@@ -512,6 +555,10 @@ async def _process_shipment(shipment: dict):
         _pending_countdowns.pop(shipment_id, None)
         await countdown_manager.cancel_countdown(
             shipment_id, reason="Risk dropped below threshold"
+        )
+        await db.decisions.update_one(
+            {"shipment_id": shipment_id, "status": "pending"},
+            {"$set": {"status": "cancelled"}},
         )
         logger.info(f"Countdown cancelled for {shipment_id} — risk now {new_level}")
 
@@ -528,6 +575,7 @@ async def _process_shipment(shipment: dict):
             "updated_at":           now,
             "is_delayed":           new_is_delayed,
             "delay_minutes":        new_delay_mins,
+            **({"status": "delivered"} if newly_delivered else {}),
             # Reset cascade_notified so propagation fires when newly delayed
             **({"cascade_notified": False} if new_is_delayed and not was_delayed else {}),
         },
@@ -551,6 +599,17 @@ async def _process_shipment(shipment: dict):
     except Exception as e:
         logger.error(f"MongoDB update failed for {shipment_id}: {e}")
         return
+
+    # STEP 8a — Clean up in-memory state for delivered shipments
+    if newly_delivered:
+        _gps_last_position.pop(shipment_id, None)
+        _api_failure_cooldown.pop(f"{shipment_id}:weather", None)
+        _api_failure_cooldown.pop(f"{shipment_id}:gemini", None)
+        if shipment_id in _pending_countdowns:
+            _pending_countdowns[shipment_id].cancel()
+            _pending_countdowns.pop(shipment_id, None)
+        logger.info(f"Shipment {shipment_name} marked as delivered — caches cleared")
+        return  # no further processing needed
 
     # STEP 8b — Cascade propagation when newly delayed
     if new_is_delayed and not was_delayed and new_delay_mins > 0:
@@ -656,15 +715,27 @@ async def recompute_all_shipments():
         logger.info("No active shipments to process")
         return
 
+    # Prune in-memory caches for shipments no longer active
+    active_ids = {str(s["_id"]) for s in active}
+    for stale_id in list(_gps_last_position.keys()):
+        if stale_id not in active_ids:
+            _gps_last_position.pop(stale_id, None)
+    for key in list(_api_failure_cooldown.keys()):
+        if key.split(":")[0] not in active_ids:
+            _api_failure_cooldown.pop(key, None)
+
     logger.info(f"Processing {len(active)} active shipments")
 
-    for shipment in active:
-        try:
-            await _process_shipment(shipment)
-        except Exception as e:
-            # Never let one shipment crash the whole loop
-            logger.error(f"Error processing shipment {shipment.get('_id')}: {e}")
-            continue
+    BATCH_SIZE = 10
+    for i in range(0, len(active), BATCH_SIZE):
+        batch = active[i:i + BATCH_SIZE]
+        results = await asyncio.gather(
+            *[_process_shipment(s) for s in batch],
+            return_exceptions=True,
+        )
+        for shipment, result in zip(batch, results):
+            if isinstance(result, Exception):
+                logger.error(f"Error processing shipment {shipment.get('_id')}: {result}")
 
     logger.info("Scheduler cycle complete")
 
@@ -672,12 +743,20 @@ async def recompute_all_shipments():
 #star and stop points
 
 def start_scheduler():
+    from services.cache import cleanup_all_caches
     scheduler.add_job(
         recompute_all_shipments,
         trigger="interval",
         minutes=5,
         id="risk_recompute",
-        max_instances=1,      # never run two at same time
+        max_instances=1,
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        cleanup_all_caches,
+        trigger="interval",
+        minutes=10,
+        id="cache_cleanup",
         replace_existing=True,
     )
     scheduler.start()

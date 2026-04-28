@@ -10,7 +10,6 @@
 
 import asyncio
 import logging
-import math
 import random
 from datetime import datetime, timezone, timedelta
 from typing import Literal
@@ -119,15 +118,7 @@ def _generate_alternative_routes(original_waypoints: list[dict], scenario: str) 
     return alternatives
 
 
-def _haversine_km(lat1, lng1, lat2, lng2) -> float:
-    R = 6371
-    d_lat = math.radians(lat2 - lat1)
-    d_lng = math.radians(lng2 - lng1)
-    a = (math.sin(d_lat / 2) ** 2
-         + math.cos(math.radians(lat1))
-         * math.cos(math.radians(lat2))
-         * math.sin(d_lng / 2) ** 2)
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+from utils.geo import haversine_km as _haversine_km
 
 
 # ── AI Scoring ─────────────────────────────────────────────────────────────────

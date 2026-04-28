@@ -46,7 +46,7 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
     }).catch(() => {});
   }, [isOpen]);
 
-  const addViaPoint = () => setViaPoints(prev => prev.length < 5 ? [...prev, { location_name: '', type: 'pickup' }] : prev);
+  const addViaPoint = () => setViaPoints(prev => prev.length < 5 ? [...prev, { location_name: '', type: 'pickup', stop_duration_minutes: 0 }] : prev);
   const updateViaPoint = (index, field, value) => setViaPoints(prev => {
      const next = [...prev];
      next[index][field] = value;
@@ -60,7 +60,10 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
         shipment_name: data.shipment_name,
         origin_name: data.origin_name,
         destination_name: data.destination_name,
-        via_points: viaPoints.filter(vp => vp.location_name.trim() !== ''),
+        via_points: viaPoints.filter(vp => vp.location_name.trim() !== '').map(vp => ({
+          ...vp,
+          stop_duration_minutes: Number(vp.stop_duration_minutes) || 0
+        })),
         auto_reroute_enabled: data.auto_reroute_enabled,
         ...(upstreamId ? { upstream_shipment_id: upstreamId, depends_on_delivery: true } : {}),
       });
@@ -168,6 +171,17 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
                         <option value="pickup">Pick-up</option>
                         <option value="delivery">Delivery</option>
                         <option value="custom">Custom</option>
+                     </select>
+                     <select 
+                        className="bg-theme-secondary border border-theme text-theme-primary text-sm rounded-xl px-2 py-3 focus:ring-2 focus:ring-accent outline-none min-w-[100px]"
+                        value={vp.stop_duration_minutes || 0}
+                        onChange={(e) => updateViaPoint(index, 'stop_duration_minutes', parseInt(e.target.value, 10))}
+                     >
+                        <option value={0}>No Wait</option>
+                        <option value={15}>15 min</option>
+                        <option value={30}>30 min</option>
+                        <option value={60}>1 hr</option>
+                        <option value={120}>2 hr</option>
                      </select>
                      <button
                         type="button"

@@ -3,12 +3,15 @@
 #   - Routing (coordinates → waypoints every 50km)
 #   - Real-time traffic (duration with traffic vs without)
 
-import httpx
+import asyncio
 import math
+import httpx
 import os
 import re
 import logging
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
+from utils.geo import haversine_km as _haversine_km
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -17,6 +20,38 @@ CLIENT_ID     = os.getenv("MAPPLS_CLIENT_ID")
 CLIENT_SECRET = os.getenv("MAPPLS_CLIENT_SECRET")
 
 WAYPOINT_INTERVAL_KM = 50
+
+# ── Token cache — reuse until 2 minutes before expiry ─────────────────────────
+_token_cache: dict = {"token": None, "expires_at": None}
+_token_lock = asyncio.Lock()
+
+
+async def get_token() -> str:
+    async with _token_lock:
+        now = datetime.now(timezone.utc)
+        if (_token_cache["token"]
+                and _token_cache["expires_at"]
+                and now < _token_cache["expires_at"]):
+            return _token_cache["token"]
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    "https://outpost.mappls.com/api/security/oauth/token",
+                    data={
+                        "grant_type":    "client_credentials",
+                        "client_id":     CLIENT_ID,
+                        "client_secret": CLIENT_SECRET,
+                    }
+                )
+                resp.raise_for_status()
+                token = resp.json()["access_token"]
+                _token_cache["token"] = token
+                _token_cache["expires_at"] = now + timedelta(seconds=3500)  # 58-min TTL
+                return token
+        except Exception as e:
+            logger.warning(f"Failed to get Mappls token: {e}. Returning cached/dummy token.")
+            return _token_cache["token"] or "dummy_token"
+
 
 # ── Helpers + Geocoding Fallbacks ──────────────────────────────────────────────
 
@@ -35,37 +70,6 @@ def _get_fallback_route(origin: dict, dest: dict) -> dict:
         "road_names": ["Fallback API-Limit Highway"],
         "alternatives": []
     }
-
-async def get_token() -> str:
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                "https://outpost.mappls.com/api/security/oauth/token",
-                data={
-                    "grant_type":    "client_credentials",
-                    "client_id":     CLIENT_ID,
-                    "client_secret": CLIENT_SECRET,
-                }
-            )
-            resp.raise_for_status()
-            return resp.json()["access_token"]
-    except Exception as e:
-        logger.warning(f"Failed to get Mappls token: {e}. Returning dummy token.")
-        return "dummy_token"
-
-
-# ── Haversine + waypoint extraction (same logic as ors_service) ───────────────
-
-def _haversine_km(lat1, lng1, lat2, lng2) -> float:
-    """Straight-line distance in km between two coordinates."""
-    R = 6371
-    d_lat = math.radians(lat2 - lat1)
-    d_lng = math.radians(lng2 - lng1)
-    a = (math.sin(d_lat / 2) ** 2
-         + math.cos(math.radians(lat1))
-         * math.cos(math.radians(lat2))
-         * math.sin(d_lng / 2) ** 2)
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 def _extract_waypoints_every_50km(coordinates: list) -> list[dict]:
@@ -257,6 +261,7 @@ async def get_route(
         "eta_hours":                   round(duration_with / 3600, 2),
         "road_names":                  road_names,
         "alternatives":                [],
+        "leg_durations":               [int(leg.get("duration", 0)) for leg in legs],
     }
 
     # Alternative routes
@@ -455,10 +460,8 @@ async def get_route_alternatives(
     if failed:
         logger.warning(f"{failed}/3 corridor route(s) failed, got {len(valid)} valid")
 
-        return RuntimeError(f"Only {len(valid)}/3 corridor routes succeeded — Mappls API limits? Using fallback.")
-
     if len(valid) == 0:
-        logger.error("All alternatives failed. Mocking one fallback alternative.")
+        logger.error("All alternatives failed. Using fallback route.")
         return [_get_fallback_route(origin_coords, dest_coords)]
 
     logger.info(f"Alternatives: {len(valid)}/3 corridors computed for {origin_coords} → {dest_coords}")
