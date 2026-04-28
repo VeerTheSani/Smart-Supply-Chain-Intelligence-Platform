@@ -203,6 +203,23 @@ async def create_shipment(data: ShipmentCreate, background_tasks: BackgroundTask
     # Generate tracking number
     tracking_number = f"SC-{str(uuid.uuid4())[:8].upper()}"
 
+    # Resolve upstream metadata for dependent shipments
+    upstream_tracking_number = None
+    upstream_shipment_name   = None
+    scheduled_departure      = None
+    if data.upstream_shipment_id:
+        try:
+            up = await db.shipments.find_one(
+                {"_id": ObjectId(data.upstream_shipment_id)},
+                {"original_eta": 1, "tracking_number": 1, "shipment_name": 1}
+            )
+            if up:
+                upstream_tracking_number = up.get("tracking_number")
+                upstream_shipment_name   = up.get("shipment_name")
+                scheduled_departure      = up.get("original_eta")  # when upstream is expected to arrive
+        except Exception as e:
+            logger.warning(f"Could not fetch upstream shipment {data.upstream_shipment_id}: {e}")
+
     doc = {
         # Core fields (your schema)
         "shipment_name":         data.shipment_name,
@@ -250,12 +267,15 @@ async def create_shipment(data: ShipmentCreate, background_tasks: BackgroundTask
         "alerts_triggered":     [],
 
         # Cascade dependency
-        "upstream_shipment_id": data.upstream_shipment_id,
-        "depends_on_delivery":  data.depends_on_delivery,
-        "original_eta":         now + timedelta(seconds=expected_travel_secs),
-        "delay_minutes":        0,
-        "is_delayed":           False,
-        "cascade_notified":     True,
+        "upstream_shipment_id":     data.upstream_shipment_id,
+        "upstream_tracking_number": upstream_tracking_number,
+        "upstream_shipment_name":   upstream_shipment_name,
+        "depends_on_delivery":      data.depends_on_delivery,
+        "scheduled_departure":      scheduled_departure,
+        "original_eta":             now + timedelta(seconds=expected_travel_secs),
+        "delay_minutes":            0,
+        "is_delayed":               False,
+        "cascade_notified":         True,
 
         # Timestamps
         "created_at": now,

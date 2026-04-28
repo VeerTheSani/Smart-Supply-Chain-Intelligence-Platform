@@ -283,14 +283,29 @@ async def _cascade_propagate(parent_id: str, delay_minutes: int, depth: int = 0)
         child_name = child.get("shipment_name", "Unknown")
 
         try:
+            # Shift scheduled_departure by the upstream delay
+            child_departure = child.get("scheduled_departure")
+            if child_departure:
+                if isinstance(child_departure, str):
+                    child_departure = datetime.fromisoformat(child_departure)
+                if child_departure.tzinfo is None:
+                    child_departure = child_departure.replace(tzinfo=timezone.utc)
+                new_departure = child_departure + timedelta(minutes=delay_minutes)
+            else:
+                new_departure = None
+
+            update_fields = {
+                "delay_minutes":    delay_minutes,
+                "is_delayed":       delay_minutes > 30,
+                "cascade_notified": False,
+                "updated_at":       now,
+            }
+            if new_departure:
+                update_fields["scheduled_departure"] = new_departure
+
             await db.shipments.update_one(
                 {"_id": child["_id"]},
-                {"$set": {
-                    "delay_minutes":    delay_minutes,
-                    "is_delayed":       delay_minutes > 30,
-                    "cascade_notified": False,
-                    "updated_at":       now,
-                }}
+                {"$set": update_fields}
             )
         except Exception as e:
             logger.error(f"Cascade update failed for child {child_id}: {e}")

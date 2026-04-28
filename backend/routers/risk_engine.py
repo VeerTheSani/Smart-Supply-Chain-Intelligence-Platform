@@ -232,17 +232,37 @@ async def _compute_historical_score(
     destination: str = "",
     via_point_names: list[str] = [],
 ) -> dict:
-    result = await get_road_disturbance_score(
-        road_names, planned_date, risk_level,
-        origin=origin, destination=destination, via_points=via_point_names,
-    )
-    return {
-        "score":             result["score"],
-        "reason":            result["reason"],
-        "weight":            WEIGHTS["historical"],
-        "incident_location": result.get("incident_location", ""),
-        "safe_waypoint":     result.get("safe_waypoint", ""),
-    }
+    from services.gemini_service import get_road_disturbance_score
+    try:
+        res = await get_road_disturbance_score(
+            road_names, planned_date, risk_level,
+            origin=origin, destination=destination, via_points=via_point_names,
+        )
+        
+        incident_location = res.get("incident_location", "")
+        incident_coords = None
+        
+        if incident_location and "unavailable" not in incident_location.lower():
+            try:
+                from services.mappls_service import geocode
+                geo = await geocode(incident_location)
+                incident_coords = {"lat": geo["lat"], "lng": geo["lng"]}
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Failed to geocode Gemini incident location '{incident_location}': {e}")
+
+        return {
+            "score":             res["score"],
+            "reason":            res["reason"],
+            "weight":            WEIGHTS["historical"],
+            "incident_location": incident_location,
+            "incident_coords":   incident_coords,
+            "safe_waypoint":     res.get("safe_waypoint", ""),
+        }
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Historical risk failed: {e}")
+        return {"score": 0, "reason": "unavailable", "weight": WEIGHTS["historical"]}
 
 
 #main masalaa , with protin tube with white soas

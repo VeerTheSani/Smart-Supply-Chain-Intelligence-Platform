@@ -147,7 +147,7 @@ const INCIDENT_COLOR = {
 
 const SEVERITY_LABELS = ['Unknown', 'Minor', 'Moderate', 'Major', 'Critical'];
 
-function RouteMapInner({ alternatives, primaryWaypoints, primaryGeometryEncoded, originCoords, destCoords, currentRoute, hoveredId, incidents, shipment }) {
+function RouteMapInner({ alternatives, primaryWaypoints, primaryGeometryEncoded, originCoords, destCoords, currentRoute, hoveredId, incidents, shipment, geminiLocation }) {
   const currentPositions = primaryGeometryEncoded
     ? decodePolyline(primaryGeometryEncoded)
     : primaryWaypoints?.length > 1
@@ -362,11 +362,42 @@ function RouteMapInner({ alternatives, primaryWaypoints, primaryGeometryEncoded,
           </Marker>
         );
       })}
+
+      {/* ── Gemini AI Exclusion Pinpoint ── */}
+      {geminiLocation && geminiLocation.coords && (
+        <Marker
+          position={[geminiLocation.coords.lat, geminiLocation.coords.lng]}
+          icon={L.divIcon({
+            className: '',
+            iconSize: [36, 36],
+            iconAnchor: [18, 36],
+            html: `
+              <div class="relative flex flex-col items-center justify-center animate-bounce duration-1000">
+                <div class="absolute inset-0 bg-violet-500/30 rounded-full blur-md animate-pulse"></div>
+                <div class="w-8 h-8 rounded-full bg-violet-600/90 border-2 border-violet-300 shadow-[0_0_15px_rgba(139,92,246,0.8)] flex items-center justify-center z-10">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9.9 8.2 2.6-3a1.5 1.5 0 0 1 2.4.4l3 6"></path><path d="m6 15 1.5-1.5"></path><path d="M12 21a9 9 0 0 1-9-9 9 9 0 0 1 2.2-5.9"></path><path d="M16 19.8A9 9 0 0 0 21 12a9 9 0 0 0-.6-3.2"></path><path d="M11 16h2"></path></svg>
+                </div>
+                <div class="w-1.5 h-1.5 bg-violet-300 rounded-full mt-1 shadow-[0_0_5px_rgba(139,92,246,1)]"></div>
+              </div>
+            `
+          })}
+        >
+          <Tooltip direction="top" className="border-violet-500/50 bg-theme-secondary">
+            <div style={{ fontSize: 11, maxWidth: 220 }}>
+              <span className="text-[9px] font-black uppercase text-violet-400 tracking-widest flex items-center gap-1 mb-1">
+                <Sparkles className="w-2.5 h-2.5" /> AI Intel Disturbance
+              </span>
+              <p className="font-bold text-theme-primary">{geminiLocation.name}</p>
+              <p className="text-theme-secondary text-[10px] mt-0.5">Gemini recommended an avoidance maneuver for this coordinate.</p>
+            </div>
+          </Tooltip>
+        </Marker>
+      )}
     </>
   );
 }
 
-function RouteMap({ alternatives, primaryWaypoints, primaryGeometryEncoded, originCoords, destCoords, currentRoute, hoveredId, incidents, theme }) {
+function RouteMap({ alternatives, primaryWaypoints, primaryGeometryEncoded, originCoords, destCoords, currentRoute, hoveredId, incidents, theme, geminiLocation }) {
   if (!alternatives?.length) return null;
 
   return (
@@ -389,6 +420,7 @@ function RouteMap({ alternatives, primaryWaypoints, primaryGeometryEncoded, orig
           incidents={incidents}
           currentRoute={currentRoute}
           hoveredId={hoveredId}
+          geminiLocation={geminiLocation}
         />
       </MapContainer>
 
@@ -666,6 +698,12 @@ const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
   const originCoords           = shipment?.origin_coords;
   const destCoords             = shipment?.destination_coords;
   const routeIncidents         = shipment?.route_incidents ?? [];
+  
+  const historicalFactor       = shipment?.last_risk_assessment?.breakdown?.historical;
+  const geminiLocation         = historicalFactor?.incident_coords ? {
+      name: historicalFactor.incident_location,
+      coords: historicalFactor.incident_coords
+  } : null;
 
   const alternatives = scoredAlts ?? data?.alternatives ?? [];
   const isScoring    = scoreMutation.isPending;
@@ -841,6 +879,7 @@ const RerouteModal = memo(function RerouteModal({ shipmentId, onClose }) {
                       hoveredId={hoveredAlt}
                       incidents={routeIncidents}
                       theme={theme}
+                      geminiLocation={geminiLocation}
                     />
                   </motion.div>
 

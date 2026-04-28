@@ -72,8 +72,11 @@ class ShipmentResponse(BaseModel):
 
     # Cascade dependency
     upstream_shipment_id: Optional[str] = None
+    upstream_tracking_number: Optional[str] = None
+    upstream_shipment_name: Optional[str] = None
     depends_on_delivery: bool = False
     original_eta: Optional[datetime] = None
+    scheduled_departure: Optional[datetime] = None
     delay_minutes: int = 0
     is_delayed: bool = False
     cascade_notified: bool = True
