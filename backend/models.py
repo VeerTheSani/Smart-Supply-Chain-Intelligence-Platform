@@ -29,6 +29,8 @@ class ShipmentCreate(BaseModel):
     via_points: Optional[List[ViaPoint]] = []
     auto_reroute_enabled: bool = False
     system_mode: Literal["REAL", "SIM"] = "REAL"  # REAL=production, SIM=scenario lab
+    upstream_shipment_id: Optional[str] = None
+    depends_on_delivery: bool = False
 
 
 class ShipmentUpdate(BaseModel):
@@ -67,6 +69,14 @@ class ShipmentResponse(BaseModel):
     last_risk_assessment: Optional[RiskAssessment] = None
     risk_history: List[RiskAssessment] = []
     alerts_triggered: List[dict] = []
+
+    # Cascade dependency
+    upstream_shipment_id: Optional[str] = None
+    depends_on_delivery: bool = False
+    original_eta: Optional[datetime] = None
+    delay_minutes: int = 0
+    is_delayed: bool = False
+    cascade_notified: bool = True
 
     created_at: datetime
     updated_at: datetime

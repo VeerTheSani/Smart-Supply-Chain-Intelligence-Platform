@@ -4,6 +4,7 @@ import { useForm } from 'react-hook-form';
 import { X, Package, Plus } from 'lucide-react';
 import { useCreateShipment } from '../../hooks/useShipments';
 import LocationAutocomplete from './LocationAutocomplete';
+import apiClient from '../../api/apiClient';
 import toast from 'react-hot-toast';
 import { cn } from '../../lib/utils';
 
@@ -19,8 +20,10 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
 
   const createMutation = useCreateShipment();
   const autoReroute = watch('auto_reroute_enabled');
-  
+
   const [viaPoints, setViaPoints] = useState([]);
+  const [availableShipments, setAvailableShipments] = useState([]);
+  const [upstreamId, setUpstreamId] = useState('');
 
   useEffect(() => {
     register('origin_name', { required: 'Origin city is required' });
@@ -31,8 +34,17 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
     if (!isOpen) {
       reset();
       setViaPoints([]);
+      setUpstreamId('');
     }
   }, [isOpen, reset]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    apiClient.get('/api/shipments').then(res => {
+      const list = Array.isArray(res.data) ? res.data : (res.data?.shipments ?? []);
+      setAvailableShipments(list.filter(s => s.status !== 'delivered'));
+    }).catch(() => {});
+  }, [isOpen]);
 
   const addViaPoint = () => setViaPoints(prev => prev.length < 5 ? [...prev, { location_name: '', type: 'pickup' }] : prev);
   const updateViaPoint = (index, field, value) => setViaPoints(prev => {
@@ -50,6 +62,7 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
         destination_name: data.destination_name,
         via_points: viaPoints.filter(vp => vp.location_name.trim() !== ''),
         auto_reroute_enabled: data.auto_reroute_enabled,
+        ...(upstreamId ? { upstream_shipment_id: upstreamId, depends_on_delivery: true } : {}),
       });
       toast.success('Shipment deployed. Will appear once risk analysis completes (~10s).');
       reset();
@@ -190,6 +203,26 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
                   {errors.destination_name && (
                     <p className="text-danger text-xs mt-1.5">{errors.destination_name.message}</p>
                   )}
+                </div>
+
+                {/* Upstream dependency */}
+                <div>
+                  <label className="block text-sm font-bold text-theme-secondary mb-2 uppercase tracking-wide">
+                    Depends on Delivery of...
+                  </label>
+                  <select
+                    value={upstreamId}
+                    onChange={e => setUpstreamId(e.target.value)}
+                    className="w-full bg-theme-tertiary border border-theme text-theme-primary text-sm rounded-xl px-4 py-3 focus:ring-2 focus:ring-accent focus:outline-none transition-all"
+                  >
+                    <option value="">— Operates independently —</option>
+                    {availableShipments.map(s => (
+                      <option key={s.id} value={s.id}>{s.shipment_name} ({s.origin_name} → {s.destination_name})</option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-theme-secondary mt-1.5 font-medium">
+                    Select if this shipment can only depart after another arrives
+                  </p>
                 </div>
 
                 {/* Auto-Reroute Toggle */}

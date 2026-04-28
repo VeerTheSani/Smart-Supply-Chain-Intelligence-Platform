@@ -181,6 +181,33 @@ def create_api_failure(
     }
 
 
+def create_cascade_alert(
+    shipment_id: str,
+    shipment_name: str,
+    upstream_id: str,
+    upstream_name: str,
+    delay_minutes: int,
+    source: Literal["REAL_SYSTEM", "SIMULATOR"] = "REAL_SYSTEM",
+) -> dict:
+    """Downstream shipment ETA pushed because its upstream dependency is delayed."""
+    h, m = divmod(delay_minutes, 60)
+    delay_str = f"{h}h {m}m" if h else f"{m}m"
+    return {
+        "type":           "cascade_alert",
+        "source":         source,
+        "timestamp":      _utc_now(),
+        "shipment_id":    shipment_id,
+        "shipment_name":  shipment_name,
+        "upstream_id":    upstream_id,
+        "upstream_name":  upstream_name,
+        "delay_minutes":  delay_minutes,
+        "message": (
+            f"{shipment_name} ETA pushed by {delay_str} — "
+            f"upstream {upstream_name} is behind schedule."
+        ),
+    }
+
+
 def create_scenario_update(
     scenario_id: str,
     scenario_name: str,
@@ -230,6 +257,7 @@ def validate_message(msg: dict) -> tuple[bool, Optional[str]]:
         "scenario_update",
         "gps_stuck",
         "api_failure",
+        "cascade_alert",
     ]
     if msg_type not in valid_types:
         return False, f"Unknown message type: {msg_type}"

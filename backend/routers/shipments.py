@@ -2,7 +2,7 @@
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from bson import ObjectId
@@ -249,13 +249,32 @@ async def create_shipment(data: ShipmentCreate, background_tasks: BackgroundTask
         "risk_history":         [],
         "alerts_triggered":     [],
 
+        # Cascade dependency
+        "upstream_shipment_id": data.upstream_shipment_id,
+        "depends_on_delivery":  data.depends_on_delivery,
+        "original_eta":         now + timedelta(seconds=expected_travel_secs),
+        "delay_minutes":        0,
+        "is_delayed":           False,
+        "cascade_notified":     True,
+
         # Timestamps
         "created_at": now,
         "updated_at": now,
     }
 
     result = await db.shipments.insert_one(doc)
-    
+
+    if data.upstream_shipment_id:
+        try:
+            await db.shipment_dependencies.insert_one({
+                "parent_shipment_id": ObjectId(data.upstream_shipment_id),
+                "child_shipment_id":  result.inserted_id,
+                "delay_sensitivity_hours": round(eta_hours, 2),
+                "created_at": now,
+            })
+        except Exception as e:
+            logger.warning(f"Failed to insert shipment_dependency for {result.inserted_id}: {e}")
+
     # Enqueue risk assessment and incident fetching to the background so the UI doesn't block waiting for Gemini API.
     background_tasks.add_task(_background_assessment_task, str(result.inserted_id))
 

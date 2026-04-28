@@ -106,10 +106,29 @@ def _advance_location(shipment: dict) -> dict | None:
     return {"lat": round(lat, 6), "lng": round(lng, 6)}
 
 
-#   
+def _compute_progress(current_location: dict, route_waypoints: list) -> float:
+    """
+    Returns 0.0–1.0 progress fraction by finding the nearest waypoint index
+    to the shipment's current GPS position.
+    """
+    if not route_waypoints or not current_location:
+        return 0.0
+    cur_lat = current_location.get("lat", 0)
+    cur_lng = current_location.get("lng", 0)
+    best_idx = 0
+    best_dist = float("inf")
+    for i, wp in enumerate(route_waypoints):
+        d = math.hypot(wp["lat"] - cur_lat, wp["lng"] - cur_lng)
+        if d < best_dist:
+            best_dist = d
+            best_idx = i
+    return best_idx / max(len(route_waypoints) - 1, 1)
+
+
+#
 #  #  Check if enough time has passed since last Gemini call.
 # ## Prevents calling Gemini every 5 mins on low risk shipments.
-    
+
 
 def _should_call_gemini(shipment: dict, current_risk_level: str) -> bool:
     """
@@ -227,6 +246,80 @@ async def _countdown_and_reroute(shipment_id: str, shipment: dict, risk_level: s
 
 # main fuctionn
 
+async def _cascade_propagate(parent_id: str, delay_minutes: int, depth: int = 0):
+    """
+    Recursively push a parent shipment's delay down to all children that
+    declare upstream_shipment_id == parent_id.  Stops at depth 5 to prevent
+    runaway recursion on circular data.
+    """
+    from core.event_factory import create_cascade_alert  # late import — defined in Session 5
+
+    if depth > 5:
+        return
+
+    now = datetime.now(timezone.utc)
+    try:
+        children = await db.shipments.find(
+            {"upstream_shipment_id": parent_id, "status": {"$nin": ["delivered"]}}
+        ).to_list(50)
+    except Exception as e:
+        logger.error(f"Cascade query failed for parent {parent_id}: {e}")
+        return
+
+    if not children:
+        return
+
+    parent_doc = None
+    try:
+        parent_doc = await db.shipments.find_one(
+            {"_id": ObjectId(parent_id)}, {"shipment_name": 1}
+        )
+    except Exception:
+        pass
+    parent_name = (parent_doc or {}).get("shipment_name", "Unknown")
+
+    for child in children:
+        child_id   = str(child["_id"])
+        child_name = child.get("shipment_name", "Unknown")
+
+        try:
+            await db.shipments.update_one(
+                {"_id": child["_id"]},
+                {"$set": {
+                    "delay_minutes":    delay_minutes,
+                    "is_delayed":       delay_minutes > 30,
+                    "cascade_notified": False,
+                    "updated_at":       now,
+                }}
+            )
+        except Exception as e:
+            logger.error(f"Cascade update failed for child {child_id}: {e}")
+            continue
+
+        try:
+            alert = create_cascade_alert(
+                shipment_id=child_id,
+                shipment_name=child_name,
+                upstream_id=parent_id,
+                upstream_name=parent_name,
+                delay_minutes=delay_minutes,
+            )
+            await manager.broadcast(alert)
+            await db.shipments.update_one(
+                {"_id": child["_id"]},
+                {"$set": {"cascade_notified": True}}
+            )
+            logger.info(
+                f"Cascade alert: {child_name} delayed {delay_minutes}m "
+                f"due to upstream {parent_name}"
+            )
+        except Exception as e:
+            logger.warning(f"Cascade alert broadcast failed for {child_id}: {e}")
+
+        # Recurse into grandchildren
+        await _cascade_propagate(child_id, delay_minutes, depth + 1)
+
+
 async def _process_shipment(shipment: dict):
     """Process a single shipment — advance GPS, check risk, alert if changed."""
     from routers.risk_engine import calculate_risk
@@ -277,6 +370,29 @@ async def _process_shipment(shipment: dict):
                 logger.warning(
                     f"GPS stuck: {shipment_name} | no movement for {duration_minutes} min"
                 )
+
+    # STEP 1c — Delay detection: compare current ETA projection to original_eta
+    was_delayed    = shipment.get("is_delayed", False)
+    new_delay_mins = 0
+    new_is_delayed = False
+
+    original_eta = shipment.get("original_eta")
+    if original_eta and shipment.get("status") not in ("delivered",):
+        progress        = _compute_progress(
+            shipment.get("current_location") or {},
+            shipment.get("route_waypoints", [])
+        )
+        remaining_secs  = (1.0 - progress) * (shipment.get("expected_travel_seconds") or 0)
+        current_eta_dt  = now + timedelta(seconds=remaining_secs)
+
+        if isinstance(original_eta, str):
+            original_eta = datetime.fromisoformat(original_eta)
+        if original_eta.tzinfo is None:
+            original_eta = original_eta.replace(tzinfo=timezone.utc)
+
+        drift_mins     = max(0.0, (current_eta_dt - original_eta).total_seconds() / 60)
+        new_is_delayed = drift_mins > 30
+        new_delay_mins = int(drift_mins) if new_is_delayed else 0
 
     # STEP 2 — Check if we should call Gemini
     prev_level = (
@@ -395,6 +511,10 @@ async def _process_shipment(shipment: dict):
         "$set": {
             "last_risk_assessment": assessment_to_store,
             "updated_at":           now,
+            "is_delayed":           new_is_delayed,
+            "delay_minutes":        new_delay_mins,
+            # Reset cascade_notified so propagation fires when newly delayed
+            **({"cascade_notified": False} if new_is_delayed and not was_delayed else {}),
         },
         "$push": {
             "risk_history": assessment_to_store
@@ -416,6 +536,11 @@ async def _process_shipment(shipment: dict):
     except Exception as e:
         logger.error(f"MongoDB update failed for {shipment_id}: {e}")
         return
+
+    # STEP 8b — Cascade propagation when newly delayed
+    if new_is_delayed and not was_delayed and new_delay_mins > 0:
+        asyncio.create_task(_cascade_propagate(shipment_id, new_delay_mins))
+        logger.info(f"Cascade propagation triggered: {shipment_name} delayed {new_delay_mins}m")
 
     # STEP 9 — Refresh incidents in background (non-blocking)
     try:
