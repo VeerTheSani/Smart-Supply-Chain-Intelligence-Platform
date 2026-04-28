@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from database import db
 from routers.risk_engine import calculate_risk
@@ -23,10 +23,12 @@ def _to_id(id: str) -> ObjectId:
 
 
 @router.get("/{id}")
-async def get_risk(id: str):
+async def get_risk(id: str, force_gemini: bool = Query(False)):
     """
     Compute risk for a shipment right now.
     Saves result to MongoDB and returns the assessment.
+    
+    ?force_gemini=true — Forces a fresh Gemini AI Intel call (costs API quota).
     """
     shipment = await db.shipments.find_one({"_id": _to_id(id)})
     if not shipment:
@@ -38,8 +40,8 @@ async def get_risk(id: str):
             detail="Shipment has no route waypoints yet — route not computed"
         )
 
-    # Compute risk — skip Gemini to conserve quota; scheduler/creation handles Gemini calls
-    assessment = await calculate_risk({**shipment, "_skip_gemini": True})
+    # Skip Gemini by default to conserve quota; allow explicit retry
+    assessment = await calculate_risk({**shipment, "_skip_gemini": not force_gemini})
 
     # Convert datetime to string for MongoDB storage
     assessment_to_store = {**assessment, "computed_at": assessment["computed_at"].isoformat()}
@@ -58,5 +60,6 @@ async def get_risk(id: str):
         }
     )
 
-    logger.info(f"Risk computed for {id}: {assessment['risk_level']} ({assessment['final_score']})")
+    label = "with Gemini" if force_gemini else "cached"
+    logger.info(f"Risk computed ({label}) for {id}: {assessment['risk_level']} ({assessment['final_score']})")
     return assessment_to_store

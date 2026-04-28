@@ -92,14 +92,14 @@ const ShipmentDetailPanel = memo(function ShipmentDetailPanel({ shipment, onClos
                 <div className={cn(
                   'p-3 rounded-2xl border shadow-inner transition-all',
                   isCritical ? 'bg-red-500/10 border-red-500/30 shadow-red-500/10' :
-                  isWarning ? 'bg-yellow-500/10 border-yellow-500/30 shadow-yellow-500/10' :
-                  'bg-green-500/10 border-green-500/30 shadow-green-500/10'
+                    isWarning ? 'bg-yellow-500/10 border-yellow-500/30 shadow-yellow-500/10' :
+                      'bg-green-500/10 border-green-500/30 shadow-green-500/10'
                 )}>
                   <Truck className={cn(
                     'w-6 h-6',
                     isCritical ? 'text-red-400' :
-                    isWarning ? 'text-yellow-400' :
-                    'text-green-400'
+                      isWarning ? 'text-yellow-400' :
+                        'text-green-400'
                   )} />
                 </div>
                 <div>
@@ -134,7 +134,7 @@ const ShipmentDetailPanel = memo(function ShipmentDetailPanel({ shipment, onClos
                   <p className="text-[9px] text-theme-secondary uppercase tracking-[0.2em] font-black opacity-50 mb-0.5">Origin Node</p>
                   <p className="text-sm text-theme-primary font-bold truncate tracking-tight">{shipment.origin || shipment.origin_name}</p>
                   {departureDt && (
-                     <p className="text-[10px] font-mono text-blue-400 mt-1 uppercase tracking-wider font-bold">DEP: {departureDt.toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}</p>
+                    <p className="text-[10px] font-mono text-blue-400 mt-1 uppercase tracking-wider font-bold">DEP: {departureDt.toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}</p>
                   )}
                 </div>
               </div>
@@ -142,9 +142,9 @@ const ShipmentDetailPanel = memo(function ShipmentDetailPanel({ shipment, onClos
                 <div key={i}>
                   <div className="ml-4 border-l border-dashed border-theme h-10 flex flex-col justify-center gap-1">
                     {vp.stop_duration_minutes > 0 && (
-                       <span className="ml-6 text-[10px] font-bold text-orange-500 dark:text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded-full flex items-center gap-1.5 border border-orange-500/20 shadow-sm shadow-orange-500/5 max-w-fit">
-                          <Clock className="w-3 h-3" /> {vp.stop_duration_minutes}m dwell
-                       </span>
+                      <span className="ml-6 text-[10px] font-bold text-orange-500 dark:text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded-full flex items-center gap-1.5 border border-orange-500/20 shadow-sm shadow-orange-500/5 max-w-fit">
+                        <Clock className="w-3 h-3" /> {vp.stop_duration_minutes}m dwell
+                      </span>
                     )}
                   </div>
                   <div className="flex items-start gap-4">
@@ -155,7 +155,7 @@ const ShipmentDetailPanel = memo(function ShipmentDetailPanel({ shipment, onClos
                       <p className="text-[9px] text-theme-secondary uppercase tracking-[0.2em] font-black opacity-50 mb-0.5">Via Node • {vp.type}</p>
                       <p className="text-sm text-theme-primary font-bold truncate tracking-tight">{vp.location_name}</p>
                       {vp.eta_arrival && (
-                         <p className="text-[10px] font-mono text-green-400 mt-1 uppercase tracking-wider font-bold">ETA: {new Date(vp.eta_arrival).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}</p>
+                        <p className="text-[10px] font-mono text-green-400 mt-1 uppercase tracking-wider font-bold">ETA: {new Date(vp.eta_arrival).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}</p>
                       )}
                     </div>
                   </div>
@@ -170,10 +170,10 @@ const ShipmentDetailPanel = memo(function ShipmentDetailPanel({ shipment, onClos
                   <p className="text-[9px] text-theme-secondary uppercase tracking-[0.2em] font-black opacity-50 mb-0.5">Target Destination</p>
                   <p className="text-sm text-theme-primary font-bold truncate tracking-tight">{shipment.destination || shipment.destination_name}</p>
                   {departureDt && (
-                      <p className="text-[10px] font-mono text-green-400 mt-1 uppercase tracking-wider font-bold">
-                        ETA: {new Date(departureDt.getTime() + (parseFloat(shipment.eta_hours) || 0) * 3_600_000)
-                          .toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
-                      </p>
+                    <p className="text-[10px] font-mono text-green-400 mt-1 uppercase tracking-wider font-bold">
+                      ETA: {new Date(departureDt.getTime() + (parseFloat(shipment.eta_hours) || 0) * 3_600_000)
+                        .toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
+                    </p>
                   )}
                 </div>
               </div>

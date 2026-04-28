@@ -1,8 +1,10 @@
 import { memo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, ChevronUp, ShieldAlert, Activity, Zap } from 'lucide-react';
+import { ChevronDown, ChevronUp, ShieldAlert, Activity, Zap, RefreshCw } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import GeminiLogo from './GeminiLogo';
+import apiClient from '../../api/apiClient';
+import toast from 'react-hot-toast';
 
 const FACTOR_META = {
   weather:     { label: 'Weather',       icon: '🌦️', color: 'from-blue-500 to-cyan-400',   barColor: 'bg-blue-500' },
@@ -26,8 +28,9 @@ const RISK_BADGE = {
  *
  * @param {Object} riskAssessment - The last_risk_assessment from backend
  */
-const RiskBreakdown = memo(function RiskBreakdown({ riskAssessment }) {
+const RiskBreakdown = memo(function RiskBreakdown({ riskAssessment, shipmentId, onRetry }) {
   const [expanded, setExpanded] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   if (!riskAssessment || !riskAssessment.breakdown) return null;
 
@@ -168,10 +171,32 @@ const RiskBreakdown = memo(function RiskBreakdown({ riskAssessment }) {
                     ) : factor.reason === 'unavailable' || (typeof factor.reason === 'string' && factor.reason.includes('API error')) ? (
                       <div className="mt-2.5 p-3 rounded-xl bg-red-500/10 border border-red-500/20 flex gap-2.5 animate-in fade-in slide-in-from-top-1">
                         <ShieldAlert className="w-4 h-4 text-red-500 shrink-0 mt-0.5 animate-pulse" />
-                        <div>
+                        <div className="flex-1">
                           <p className="text-[10px] font-black text-red-500 uppercase tracking-widest leading-none mb-1.5">API Quota Exhausted</p>
                           <p className="text-[10px] text-theme-secondary leading-tight">Advanced AI Intel is unavailable due to strict Google Cloud quotas. Fallback data active. It will naturally unlock upon reset.</p>
                         </div>
+                        {shipmentId && (
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              setRetrying(true);
+                              try {
+                                const res = await apiClient.get(`/api/risk/${shipmentId}?force_gemini=true`);
+                                toast.success('Gemini AI Intel refreshed successfully');
+                                if (onRetry) onRetry(res.data);
+                              } catch (err) {
+                                toast.error(err?.response?.data?.detail || 'Gemini retry failed — quota may still be exhausted');
+                              } finally {
+                                setRetrying(false);
+                              }
+                            }}
+                            disabled={retrying}
+                            className="shrink-0 p-2 rounded-xl bg-violet-500/10 border border-violet-500/30 hover:bg-violet-500/20 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed group self-center"
+                            title="Retry Gemini AI Intel"
+                          >
+                            <RefreshCw className={cn('w-4 h-4 text-violet-400 transition-transform group-hover:rotate-180 duration-500', retrying && 'animate-spin')} />
+                          </button>
+                        )}
                       </div>
                     ) : (
                       <p className="text-[11px] text-theme-secondary mt-1.5 leading-relaxed">
