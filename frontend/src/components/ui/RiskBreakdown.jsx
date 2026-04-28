@@ -165,6 +165,14 @@ const RiskBreakdown = memo(function RiskBreakdown({ riskAssessment }) {
                         <div className="w-3.5 h-3.5 border-2 border-violet-500/30 border-t-violet-500 rounded-full animate-spin shrink-0" />
                         <p className="text-[11px] text-violet-400/80 animate-pulse font-medium">{factor.reason}</p>
                       </div>
+                    ) : factor.reason === 'unavailable' || (typeof factor.reason === 'string' && factor.reason.includes('API error')) ? (
+                      <div className="mt-2.5 p-3 rounded-xl bg-red-500/10 border border-red-500/20 flex gap-2.5 animate-in fade-in slide-in-from-top-1">
+                        <ShieldAlert className="w-4 h-4 text-red-500 shrink-0 mt-0.5 animate-pulse" />
+                        <div>
+                          <p className="text-[10px] font-black text-red-500 uppercase tracking-widest leading-none mb-1.5">API Quota Exhausted</p>
+                          <p className="text-[10px] text-theme-secondary leading-tight">Advanced AI Intel is unavailable due to strict Google Cloud quotas. Fallback data active. It will naturally unlock upon reset.</p>
+                        </div>
+                      </div>
                     ) : (
                       <p className="text-[11px] text-theme-secondary mt-1.5 leading-relaxed">
                         {factor.reason || 'No data'}

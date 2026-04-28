@@ -16,7 +16,7 @@ from bson import ObjectId
 
 from database import db
 from core.websocket_manager import manager
-from core.event_factory import create_risk_alert
+from core.event_factory import create_risk_alert, create_gps_stuck, create_api_failure
 from core.countdown_manager import countdown_manager, COUNTDOWN_SECONDS
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,37 @@ GEMINI_TTL = {
 }
 
 
-#GPS simulation 
+# ── GPS stuck detection ────────────────────────────────────────────────────────
+# Tracks the last time each shipment's position actually changed.
+# When a shipment's GPS hasn't moved for GPS_STUCK_SECONDS we fire one notification,
+# then stay silent until the truck moves again (notified flag reset on movement).
+GPS_STUCK_SECONDS = 15 * 60  # 15 minutes
+
+_gps_last_position: dict[str, dict] = {}
+# schema: {shipment_id: {"lat": float, "lng": float, "last_changed_at": datetime, "notified": bool}}
+
+# ── API failure cooldown ───────────────────────────────────────────────────────
+# One notification per shipment-service pair per hour to avoid spamming.
+API_FAILURE_COOLDOWN_SECONDS = 60 * 60  # 1 hour
+_api_failure_cooldown: dict[str, datetime] = {}
+# schema: {"<shipment_id>:<service>": last_notified_at}
+
+
+def _gps_changed(a: dict, b: dict) -> bool:
+    """True when the two positions differ by more than ~11 m (0.0001 deg)."""
+    return abs(a["lat"] - b["lat"]) > 0.0001 or abs(a["lng"] - b["lng"]) > 0.0001
+
+
+def _should_notify_api_failure(shipment_id: str, service: str, now: datetime) -> bool:
+    key = f"{shipment_id}:{service}"
+    last = _api_failure_cooldown.get(key)
+    if last is None or (now - last).total_seconds() >= API_FAILURE_COOLDOWN_SECONDS:
+        _api_failure_cooldown[key] = now
+        return True
+    return False
+
+
+#GPS simulation
 
 def _advance_location(shipment: dict) -> dict | None:
     """
@@ -210,6 +240,44 @@ async def _process_shipment(shipment: dict):
     if new_location:
         shipment["current_location"] = new_location
 
+    # STEP 1b — GPS stuck detection (in_transit / rerouting shipments only)
+    if new_location and shipment.get("status") in ("in_transit", "rerouting"):
+        prev_gps = _gps_last_position.get(shipment_id)
+        if prev_gps is None:
+            _gps_last_position[shipment_id] = {
+                "lat": new_location["lat"], "lng": new_location["lng"],
+                "last_changed_at": now, "notified": False,
+            }
+        elif _gps_changed(new_location, prev_gps):
+            # Truck moved — reset state
+            _gps_last_position[shipment_id] = {
+                "lat": new_location["lat"], "lng": new_location["lng"],
+                "last_changed_at": now, "notified": False,
+            }
+        else:
+            # Position unchanged — check duration
+            stuck_seconds = (now - prev_gps["last_changed_at"]).total_seconds()
+            if stuck_seconds >= GPS_STUCK_SECONDS and not prev_gps["notified"]:
+                duration_minutes = int(stuck_seconds / 60)
+                gps_event = create_gps_stuck(shipment_id, shipment_name, duration_minutes)
+                await manager.broadcast(gps_event)
+                await db.notifications.insert_one({
+                    "type":        "gps_stuck",
+                    "source":      "REAL_SYSTEM",
+                    "shipment_id": shipment_id,
+                    "title":       "GPS Signal Stuck",
+                    "message":     gps_event["message"],
+                    "action_taken": "manual_monitoring_required",
+                    "impact":      f"No GPS movement for {duration_minutes} min on {shipment_name}",
+                    "severity":    "high",
+                    "read":        False,
+                    "timestamp":   now.isoformat(),
+                })
+                _gps_last_position[shipment_id]["notified"] = True
+                logger.warning(
+                    f"GPS stuck: {shipment_name} | no movement for {duration_minutes} min"
+                )
+
     # STEP 2 — Check if we should call Gemini
     prev_level = (
         shipment.get("last_risk_assessment", {}) or {}
@@ -234,6 +302,54 @@ async def _process_shipment(shipment: dict):
     breakdown  = assessment["breakdown"]
     driver     = assessment["primary_driver"]
     reason     = breakdown.get(driver, {}).get("reason", "Unknown reason")
+
+    # STEP 3b — Detect API service failures from breakdown signals
+    weather_reason = breakdown.get("weather", {}).get("reason", "")
+    if "unavailable" in weather_reason.lower() and _should_notify_api_failure(shipment_id, "weather", now):
+        api_event = create_api_failure(
+            service_name="Open-Meteo (weather)",
+            error_message=weather_reason,
+            shipment_id=shipment_id,
+            shipment_name=shipment_name,
+        )
+        await manager.broadcast(api_event)
+        await db.notifications.insert_one({
+            "type":        "api_failure",
+            "source":      "REAL_SYSTEM",
+            "shipment_id": shipment_id,
+            "title":       "Weather API Unavailable",
+            "message":     api_event["message"],
+            "action_taken": "manual_monitoring_required",
+            "impact":      f"Weather risk factor skipped for {shipment_name}",
+            "severity":    "medium",
+            "read":        False,
+            "timestamp":   now.isoformat(),
+        })
+        logger.warning(f"Weather API failure for {shipment_name}: {weather_reason}")
+
+    hist_reason = breakdown.get("historical", {}).get("reason", "")
+    if hist_reason.lower() in ("unavailable", "no road names available") and \
+            _should_notify_api_failure(shipment_id, "gemini", now):
+        api_event = create_api_failure(
+            service_name="Gemini (road disturbance)",
+            error_message=hist_reason,
+            shipment_id=shipment_id,
+            shipment_name=shipment_name,
+        )
+        await manager.broadcast(api_event)
+        await db.notifications.insert_one({
+            "type":        "api_failure",
+            "source":      "REAL_SYSTEM",
+            "shipment_id": shipment_id,
+            "title":       "Gemini API Unavailable",
+            "message":     api_event["message"],
+            "action_taken": "manual_monitoring_required",
+            "impact":      f"Road disturbance factor skipped for {shipment_name}",
+            "severity":    "medium",
+            "read":        False,
+            "timestamp":   now.isoformat(),
+        })
+        logger.warning(f"Gemini API failure for {shipment_name}: {hist_reason}")
 
     # STEP 4 — Compare to previous
     risk_changed = prev_level != new_level

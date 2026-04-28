@@ -140,6 +140,47 @@ def create_decision_triggered(
     }
 
 
+def create_gps_stuck(
+    shipment_id: str,
+    shipment_name: str,
+    duration_minutes: int,
+    source: Literal["REAL_SYSTEM", "SIMULATOR"] = "REAL_SYSTEM",
+) -> dict:
+    """GPS position hasn't changed for an extended period during active transit."""
+    return {
+        "type": "gps_stuck",
+        "source": source,
+        "timestamp": _utc_now(),
+        "shipment_id": shipment_id,
+        "shipment_name": shipment_name,
+        "duration_minutes": duration_minutes,
+        "message": (
+            f"GPS signal for {shipment_name} hasn't moved in {duration_minutes} minutes — "
+            "monitor manually"
+        ),
+    }
+
+
+def create_api_failure(
+    service_name: str,
+    error_message: str,
+    shipment_id: Optional[str] = None,
+    shipment_name: Optional[str] = None,
+    source: Literal["REAL_SYSTEM", "SIMULATOR"] = "REAL_SYSTEM",
+) -> dict:
+    """An external API (weather, Gemini, routing) failed during risk calculation."""
+    return {
+        "type": "api_failure",
+        "source": source,
+        "timestamp": _utc_now(),
+        "service_name": service_name,
+        "shipment_id": shipment_id,
+        "shipment_name": shipment_name,
+        "message": "Unable to update risk score due to network error, monitor manually",
+        "error": error_message,
+    }
+
+
 def create_scenario_update(
     scenario_id: str,
     scenario_name: str,
@@ -182,11 +223,13 @@ def validate_message(msg: dict) -> tuple[bool, Optional[str]]:
     valid_types = [
         "risk_alert",
         "countdown_started",
-        "countdown_update", 
+        "countdown_update",
         "countdown_cancelled",
         "reroute_executed",
         "decision_triggered",
         "scenario_update",
+        "gps_stuck",
+        "api_failure",
     ]
     if msg_type not in valid_types:
         return False, f"Unknown message type: {msg_type}"
