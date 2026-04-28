@@ -110,7 +110,7 @@ const AlertItem = memo(function AlertItem({
           !read && severity === 'critical' && "border-l-4 border-l-red-500"
         )}
       >
-        <div className="flex items-center justify-between gap-3 mb-2">
+        <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 gap-3 mb-2">
           <div className="flex items-center gap-2">
             <div className={cn("w-6 h-6 p-1 rounded-lg border border-current/10", config.bg, config.color)}>
               {getIconForType(type)}
@@ -151,14 +151,14 @@ const AlertItem = memo(function AlertItem({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95 }}
       className={cn(
-        "p-4 transition-all cursor-pointer relative bg-theme-secondary dark:bg-[#0f172a] border-theme dark:border-slate-800/50",
+        "p-4 transition-all cursor-pointer relative bg-theme-secondary border-theme dark:border-slate-800/50",
         read ? "opacity-60" : "opacity-100",
         !read && severity === 'critical' && "bg-red-500/[0.02]",
         isSnoozed && "opacity-40"
       )}
       onClick={() => onMarkRead?.(id)}
     >
-      <div className="flex gap-4">
+      <div className="flex items-start gap-4">
         {/* Severity Icon */}
         <div className={cn(
           "w-10 h-10 rounded-xl flex items-center justify-center border shrink-0 shadow-sm transition-transform group-hover:scale-105",
@@ -175,7 +175,7 @@ const AlertItem = memo(function AlertItem({
                 <span className={cn("text-[10px] font-black uppercase tracking-[0.1em]", config.accent)}>
                   {severity || 'SYSTEM'} LOG
                 </span>
-                <span className="text-[10px] font-bold text-theme-secondary dark:text-slate-600 uppercase tracking-widest">• {alert.source === 'REAL_SYSTEM' ? 'Live' : 'Simulation'}</span>
+                <span className="text-[10px] truncate font-bold text-theme-secondary dark:text-slate-600 uppercase tracking-widest">• {alert.source === 'REAL_SYSTEM' ? 'Live' : 'Simulation'}</span>
               </div>
               <h4 className={cn(
                 "text-sm font-bold tracking-tight",
@@ -183,7 +183,7 @@ const AlertItem = memo(function AlertItem({
               )}>
                 {alert.shipment_name ? (
                   <div className="flex flex-col">
-                    <span className="text-[10px] font-black text-accent dark:text-blue-400 uppercase tracking-widest leading-none mb-1">[{alert.shipment_name}]</span>
+                    <span className="text-[10px] truncate font-black text-accent dark:text-blue-400 uppercase tracking-widest leading-none mb-1">[{alert.shipment_name}]</span>
                     <span>{title || message?.split('\n')[0] || 'Anomalous Event'}</span>
                   </div>
                 ) : (
@@ -210,7 +210,7 @@ const AlertItem = memo(function AlertItem({
               onClick={handleViewOnMap}
               className="mb-3 p-3 rounded-xl bg-theme-tertiary dark:bg-slate-900/50 border border-theme dark:border-slate-800/80 shadow-sm group/loc hover:border-accent/40 transition-all"
             >
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-2">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-lg bg-theme-secondary dark:bg-slate-800 flex items-center justify-center text-accent border border-theme dark:border-slate-700">
                     <MapPin className="w-4 h-4" />
@@ -223,7 +223,7 @@ const AlertItem = memo(function AlertItem({
                   </div>
                 </div>
                 <div className="flex items-center gap-2 text-accent opacity-0 group-hover/loc:opacity-100 transition-all transform translate-x-2 group-hover/loc:translate-x-0">
-                  <span className="text-[10px] font-black uppercase tracking-widest">Intercept</span>
+                  <span className="text-[10px] truncate font-black uppercase tracking-widest">Intercept</span>
                   <Navigation className="w-3.5 h-3.5" />
                 </div>
               </div>
@@ -231,16 +231,16 @@ const AlertItem = memo(function AlertItem({
           )}
 
           {/* Action Row */}
-          <div className="flex items-center justify-between pt-2 border-t border-theme/30">
-            <div className="flex items-center gap-4">
+          <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 pt-2 border-t border-theme/30">
+            <div className="flex items-center gap-4 min-w-0">
               {shipment_id && (
-                <span className="text-[10px] font-black font-mono text-theme-secondary/50 uppercase tracking-tighter">
+                <span className="text-[10px] truncate font-black font-mono text-theme-secondary/50 uppercase tracking-tighter">
                   Log Ref: #{shipment_id.slice(-6)}
                 </span>
               )}
             </div>
 
-            <div className="flex items-center gap-1 relative">
+            <div className="flex items-center gap-1 shrink-0 flex-wrap sm:flex-nowrap">
               <button
                 onClick={(e) => { e.stopPropagation(); onFlag?.(id); }}
                 className={cn(
@@ -280,7 +280,7 @@ const AlertItem = memo(function AlertItem({
               {!read && (
                 <button
                   onClick={(e) => { e.stopPropagation(); onMarkRead(id); }}
-                  className="px-3 py-1.5 ml-2 rounded-lg bg-theme-tertiary dark:bg-slate-800 text-[10px] font-black text-theme-primary dark:text-slate-200 uppercase tracking-widest border border-theme dark:border-slate-700 hover:bg-accent hover:text-white hover:border-accent transition-all"
+                  className="px-3 py-1.5 rounded-lg whitespace-nowrap shrink-0 rounded-lg bg-theme-tertiary dark:bg-slate-800 text-[10px] font-black text-theme-primary dark:text-slate-200 uppercase tracking-widest border border-theme dark:border-slate-700 hover:bg-accent hover:text-white hover:border-accent transition-all"
                 >
                   Acknowledge
                 </button>
