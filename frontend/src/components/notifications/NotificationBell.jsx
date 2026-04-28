@@ -1,44 +1,25 @@
 import { useState, useRef, useEffect } from 'react';
 import { Bell } from 'lucide-react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence } from 'framer-motion';
 import NotificationPanel from './NotificationPanel';
-import api from '../../api/apiClient';
-import { ENDPOINTS } from '../../config/api';
+import { useAlertStore } from '../../stores/alertStore';
 
+/**
+ * Notification Bell
+ * ==================
+ * Displays a badge count of unread alerts and opens a panel
+ * showing the event log. Reads from Zustand alert store (WebSocket stream),
+ * not from a separate API.
+ */
 export default function NotificationBell() {
   const [isOpen, setIsOpen] = useState(false);
   const bellRef = useRef(null);
-  const queryClient = useQueryClient();
 
-  const { data: notifications = [], isLoading } = useQuery({
-    queryKey: ['notifications'],
-    queryFn: async () => {
-      const { data } = await api.get(ENDPOINTS.NOTIFICATIONS);
-      return data;
-    },
-    refetchInterval: 30000, // Poll every 30s as backup
-  });
+  // Read from Zustand — same source as popup alerts
+  const { allAlerts } = useAlertStore();
 
-  const markReadMutation = useMutation({
-    mutationFn: async (id) => {
-      await api.post(ENDPOINTS.NOTIFICATION_READ(id));
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['notifications'] });
-    }
-  });
-
-  const markAllReadMutation = useMutation({
-    mutationFn: async () => {
-      await api.post(ENDPOINTS.NOTIFICATION_MARK_ALL_READ);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['notifications'] });
-    }
-  });
-
-  const unreadCount = notifications.filter(n => !n.read).length;
+  // Calculate unread count
+  const unreadCount = allAlerts.filter((a) => !a.read).length;
 
   // Close panel on outside click
   useEffect(() => {
@@ -59,10 +40,11 @@ export default function NotificationBell() {
     <div className="relative" ref={bellRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className={`relative p-2 rounded-xl transition-colors cursor-pointer ${isOpen
+        className={`relative p-2 rounded-xl transition-colors cursor-pointer ${
+          isOpen
             ? 'bg-theme-tertiary text-theme-primary shadow-inner'
             : 'text-theme-secondary hover:text-theme-primary hover:bg-theme-tertiary'
-          }`}
+        }`}
         aria-label="Notifications"
       >
         <Bell className="w-5 h-5" />
@@ -77,10 +59,7 @@ export default function NotificationBell() {
         {isOpen && (
           <NotificationPanel
             isOpen={isOpen}
-            notifications={notifications}
-            isLoading={isLoading}
-            onMarkRead={(id) => markReadMutation.mutate(id)}
-            onMarkAllRead={() => markAllReadMutation.mutate()}
+            alerts={allAlerts}
           />
         )}
       </AnimatePresence>
