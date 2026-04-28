@@ -183,10 +183,11 @@ async def get_route(
         "steps":        "true",   # ← get road names (NH48, SH17 etc)
     }
 
+    token = await get_token()
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
-                f"https://apis.mappls.com/advancedmaps/v1/{STATIC_KEY}/route_adv/driving/{coords_str}",
+                f"https://apis.mappls.com/advancedmaps/v1/{token}/route_adv/driving/{coords_str}",
                 params=params,
             )
             resp.raise_for_status()
@@ -379,45 +380,54 @@ def _compute_three_via_points(origin: dict, dest: dict) -> tuple:
     All offsets are capped so the via-point stays inside India / reachable road network.
     """
     route_dist_km = _haversine_km(origin["lat"], origin["lng"], dest["lat"], dest["lng"])
-    base_offset   = max(100, min(250, route_dist_km * 0.18))
+    base_offset   = max(130, min(300, route_dist_km * 0.25))
 
+    # Always generate both left AND right corridors so coastal/border routes
+    # don't push all three via-points into the ocean on one side.
     via_a = _compute_via_point(origin, dest, 0.50, -base_offset)           # left mid
-    via_b = _compute_via_point(origin, dest, 0.50,  base_offset * 1.10)    # right mid
-    via_c = _compute_via_point(origin, dest, 0.35,  base_offset * 1.40)    # right, earlier
+    via_b = _compute_via_point(origin, dest, 0.50,  base_offset)           # right mid (symmetric)
+    via_c = _compute_via_point(origin, dest, 0.30, -base_offset * 1.30)    # left, earlier diverge
     return via_a, via_b, via_c
 
 
 async def get_route_alternatives(
     origin_coords: dict,
     dest_coords: dict,
+    mandatory_stops: list[dict] = None,
 ) -> list[dict]:
     """
     Returns up to 3 alternative route corridors using route_adv (traffic-accurate).
     Via-points are computed geometrically — no hardcoded city names.
+    mandatory_stops: remaining pickup/delivery stops that must be included in every alternative.
     The direct O→D route is intentionally excluded (it equals the current route).
     """
     import asyncio
 
+    mandatory_stops = mandatory_stops or []
     via_a, via_b, via_c = _compute_three_via_points(origin_coords, dest_coords)
 
-    async def _fetch_via(via: dict) -> dict | Exception:
+    async def _fetch_via(corridor_via: dict) -> dict | Exception:
+        # mandatory stops first, then the corridor deviation point
+        middle = mandatory_stops + [corridor_via]
+        middle_str = ";".join(f"{v['lng']},{v['lat']}" for v in middle)
         coords_str = (
             f"{origin_coords['lng']},{origin_coords['lat']};"
-            f"{via['lng']},{via['lat']};"
+            f"{middle_str};"
             f"{dest_coords['lng']},{dest_coords['lat']}"
         )
         params = {"traffic": "true", "geometries": "polyline", "overview": "full", "steps": "false"}
 
+        token = await get_token()
         try:
             async with httpx.AsyncClient(timeout=20.0) as client:
                 resp = await client.get(
-                    f"https://apis.mappls.com/advancedmaps/v1/{STATIC_KEY}/route_adv/driving/{coords_str}",
+                    f"https://apis.mappls.com/advancedmaps/v1/{token}/route_adv/driving/{coords_str}",
                     params=params,
                 )
                 resp.raise_for_status()
                 data = resp.json()
         except Exception as e:
-            logger.warning(f"Mappls alternative fetch failed (via={via}): {e}")
+            logger.warning(f"Mappls alternative fetch failed (via={corridor_via}): {e}")
             return e
 
         routes = data.get("routes", [])
@@ -429,7 +439,7 @@ async def get_route_alternatives(
         distance = r.get("distance", 0)
 
         if dur_with == 0 or distance == 0:
-            return RuntimeError(f"Mappls returned zero-data route for via={via} — skipping")
+            return RuntimeError(f"Mappls returned zero-data route for via={corridor_via} — skipping")
 
         dur_no_tr = int(r.get("duration_without_traffic", dur_with))
         if dur_with > 0 and dur_with == dur_no_tr:
@@ -459,7 +469,43 @@ async def get_route_alternatives(
         logger.warning(f"{failed}/3 corridor route(s) failed, got {len(valid)} valid")
 
     if len(valid) == 0:
-        logger.error("All alternatives failed. Using fallback route.")
+        # All corridor via-points failed (e.g. landed in ocean) — fall back to a direct Mappls route
+        logger.warning("All corridor alternatives failed — fetching direct route as fallback")
+        try:
+            direct_stops_str = ""
+            if mandatory_stops:
+                direct_stops_str = ";".join(f"{v['lng']},{v['lat']}" for v in mandatory_stops) + ";"
+            coords_str = (
+                f"{origin_coords['lng']},{origin_coords['lat']};"
+                f"{direct_stops_str}"
+                f"{dest_coords['lng']},{dest_coords['lat']}"
+            )
+            _fb_token = await get_token()
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.get(
+                    f"https://apis.mappls.com/advancedmaps/v1/{_fb_token}/route_adv/driving/{coords_str}",
+                    params={"traffic": "true", "geometries": "polyline", "overview": "full", "steps": "false"},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            routes = data.get("routes", [])
+            if routes:
+                r = routes[0]
+                dur = int(r.get("duration", 0)) or 1
+                dist = r.get("distance", 0)
+                dur_ntr = int(r.get("duration_without_traffic", dur))
+                coords = _decode_polyline(r.get("geometry", ""))
+                return [{
+                    "waypoints":                   _extract_waypoints_every_50km(coords),
+                    "geometry_encoded":            r.get("geometry", ""),
+                    "distance_km":                 round(dist / 1000, 2),
+                    "duration_seconds":            dur,
+                    "duration_no_traffic_seconds": dur_ntr,
+                    "traffic_ratio":               round(dur / dur_ntr, 3) if dur_ntr > 0 else 1.0,
+                    "eta_hours":                   round(dur / 3600, 2),
+                }]
+        except Exception as e:
+            logger.error(f"Direct route fallback also failed: {e}")
         return [_get_fallback_route(origin_coords, dest_coords)]
 
     logger.info(f"Alternatives: {len(valid)}/3 corridors computed for {origin_coords} → {dest_coords}")
@@ -486,10 +532,11 @@ async def get_route_through(
     )
     params = {"traffic": "true", "geometries": "polyline", "overview": "full", "steps": "false"}
 
+    token = await get_token()
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.get(
-                f"https://apis.mappls.com/advancedmaps/v1/{STATIC_KEY}/route_adv/driving/{coords_str}",
+                f"https://apis.mappls.com/advancedmaps/v1/{token}/route_adv/driving/{coords_str}",
                 params=params,
             )
             resp.raise_for_status()

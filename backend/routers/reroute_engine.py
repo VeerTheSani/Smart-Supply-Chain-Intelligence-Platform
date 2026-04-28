@@ -259,8 +259,8 @@ async def get_alternatives(shipment: dict) -> dict:
     logger.info("Fetching alternative routes (fast path, traffic only)...")
     all_routes = await get_route_alternatives(current_location, dest_coords)
 
-    if len(all_routes) < 2:
-        raise ValueError("Could not compute at least 2 alternative routes for this path")
+    if len(all_routes) < 1:
+        raise ValueError("Could not compute any alternative routes for this path")
 
     # Quick risk estimate from traffic ratio only — no weather API
     routes_scored = []

@@ -14,8 +14,15 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+
+def _get_api_key():
+    # Dynamically reload from .env so user changes take effect immediately without restarting the backend
+    load_dotenv(override=True)
+    key = os.getenv("GEMINI_API_KEY")
+    if not key:
+        logger.error("GEMINI_API_KEY not set in .env")
+    return key
 
 
 async def get_route_events(
@@ -28,8 +35,8 @@ async def get_route_events(
     """
     Ask Gemini to search for any disruptions along the route.
     """
-    if not GEMINI_API_KEY:
-        logger.error("GEMINI_API_KEY not set in .env")
+    api_key = _get_api_key()
+    if not api_key:
         return _default_response("Gemini API key not configured")
 
     cities_str = ", ".join(segment_cities) if segment_cities else "route"
@@ -89,7 +96,7 @@ If no disruptions found, return severity_score 0 and empty events_found array.""
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 GEMINI_URL,
-                params={"key": GEMINI_API_KEY},
+                params={"key": api_key},
                 json=payload,
             )
             resp.raise_for_status()
@@ -161,6 +168,7 @@ async def get_road_disturbance_score(
     origin: str = "",
     destination: str = "",
     via_points: list[str] = [],
+    force_refresh: bool = False,
 ) -> dict:
     """
     Search for disturbances on specific highway numbers near a planned date.
@@ -168,8 +176,8 @@ async def get_road_disturbance_score(
     safe_waypoint is a bypass city name only when score >= 40, else empty string.
     Falls back to {"score": 0, "reason": "unavailable", ...} on any error.
     """
-    if not GEMINI_API_KEY:
-        logger.error("GEMINI_API_KEY not set in .env")
+    api_key = _get_api_key()
+    if not api_key:
         return _disturbance_fallback("unavailable")
 
     if not road_names:
@@ -182,10 +190,11 @@ async def get_road_disturbance_score(
     route_key = f"{origin}>{destination}"
     cache_key = f"road_dist:{'|'.join(sorted(road_names))}:{planned_date}:{route_key}"
 
-    cached = road_disturbance_cache.get(cache_key)
-    if cached is not None:
-        logger.debug(f"Road disturbance cache hit for {cache_key}")
-        return cached
+    if not force_refresh:
+        cached = road_disturbance_cache.get(cache_key)
+        if cached is not None:
+            logger.debug(f"Road disturbance cache hit for {cache_key}")
+            return cached
 
     roads_str = ", ".join(road_names)
     stops_str = " → ".join(via_points) if via_points else ""
@@ -223,7 +232,7 @@ If score < 40, safe_waypoint and incident_location must be empty strings."""
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 GEMINI_URL,
-                params={"key": GEMINI_API_KEY},
+                params={"key": api_key},
                 json=payload,
             )
             resp.raise_for_status()

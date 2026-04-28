@@ -223,12 +223,14 @@ async def _compute_historical_score(
     origin: str = "",
     destination: str = "",
     via_point_names: list[str] = [],
+    force_refresh: bool = False,
 ) -> dict:
     from services.gemini_service import get_road_disturbance_score
     try:
         res = await get_road_disturbance_score(
             road_names, planned_date, risk_level,
             origin=origin, destination=destination, via_points=via_point_names,
+            force_refresh=force_refresh,
         )
         
         incident_location = res.get("incident_location", "")
@@ -298,6 +300,7 @@ async def calculate_risk(shipment: dict) -> dict:
             _compute_historical_score(
                 road_names, planned_date, prev_risk_lvl,
                 origin=origin_name, destination=destination_name, via_point_names=via_point_names,
+                force_refresh=not skip_gemini,
             ),
         )
     event_data = _compute_event_score(stored_incidents)
