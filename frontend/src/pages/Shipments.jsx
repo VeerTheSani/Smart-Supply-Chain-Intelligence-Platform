@@ -404,17 +404,6 @@ const Shipments = memo(function Shipments() {
                     >
                       <td className="py-4 px-6">
                         <div className="flex items-center gap-2">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setExpandedId(prev => prev === shipment.id ? null : shipment.id);
-                            }}
-                            className="p-1 rounded-lg hover:bg-theme-tertiary transition-colors text-theme-secondary hover:text-accent cursor-pointer"
-                          >
-                            {expandedId === shipment.id
-                              ? <ChevronUp className="w-3.5 h-3.5" />
-                              : <ChevronDown className="w-3.5 h-3.5" />}
-                          </button>
                           <span className="font-mono text-sm font-semibold text-theme-primary bg-theme-tertiary px-2 py-1 rounded">
                             {shipment.tracking_number}
                           </span>
@@ -589,9 +578,9 @@ const Shipments = memo(function Shipments() {
                       </td>
                     </tr>
 
-                    {/* Expandable chain timeline row */}
+                    {/* Expanded chain timeline row By Default */}
                     <AnimatePresence>
-                      {expandedId === shipment.id && (
+                      {shipment.upstream_shipment_id && (
                         <tr key={`expand-${shipment.id}`}>
                           <td colSpan="7" className="px-0 py-0 border-0">
                             <motion.div
@@ -599,7 +588,7 @@ const Shipments = memo(function Shipments() {
                               animate={{ height: 'auto', opacity: 1 }}
                               exit={{ height: 0, opacity: 0 }}
                               transition={{ duration: 0.22, ease: 'easeInOut' }}
-                              className="overflow-hidden border-t border-b border-blue-500/15"
+                              className="overflow-hidden border-t border-b border-blue-500/15 relative z-0"
                               style={{ background: 'color-mix(in srgb, var(--color-accent, #3b82f6) 3%, transparent)' }}
                             >
                               <div className="px-8 py-5">
