@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 CLIENT_ID     = os.getenv("MAPPLS_CLIENT_ID")
 CLIENT_SECRET = os.getenv("MAPPLS_CLIENT_SECRET")
+STATIC_KEY    = os.getenv("MAPPLS_STATIC_KEY")
 
 WAYPOINT_INTERVAL_KM = 50
 
@@ -167,8 +168,6 @@ async def get_route(
         "alternatives":               list
     }
     """
-    token = await get_token()
-
     # Mappls route format: lng,lat;lng,lat
     coords_str = f"{origin_coords['lng']},{origin_coords['lat']};"
     if via_coords_list:
@@ -187,7 +186,7 @@ async def get_route(
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
-                f"https://apis.mappls.com/advancedmaps/v1/{token}/route_adv/driving/{coords_str}",
+                f"https://apis.mappls.com/advancedmaps/v1/{STATIC_KEY}/route_adv/driving/{coords_str}",
                 params=params,
             )
             resp.raise_for_status()
@@ -400,7 +399,6 @@ async def get_route_alternatives(
     import asyncio
 
     via_a, via_b, via_c = _compute_three_via_points(origin_coords, dest_coords)
-    token = await get_token()
 
     async def _fetch_via(via: dict) -> dict | Exception:
         coords_str = (
@@ -413,7 +411,7 @@ async def get_route_alternatives(
         try:
             async with httpx.AsyncClient(timeout=20.0) as client:
                 resp = await client.get(
-                    f"https://apis.mappls.com/advancedmaps/v1/{token}/route_adv/driving/{coords_str}",
+                    f"https://apis.mappls.com/advancedmaps/v1/{STATIC_KEY}/route_adv/driving/{coords_str}",
                     params=params,
                 )
                 resp.raise_for_status()
@@ -479,7 +477,6 @@ async def get_route_through(
     Used by the avoidance route logic in reroute_engine.
     Returns same dict shape as get_route_alternatives entries, or None on failure.
     """
-    token = await get_token()
     vias = via_coords if isinstance(via_coords, list) else [via_coords]
     via_parts = ";".join(f"{v['lng']},{v['lat']}" for v in vias)
     coords_str = (
@@ -492,7 +489,7 @@ async def get_route_through(
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.get(
-                f"https://apis.mappls.com/advancedmaps/v1/{token}/route_adv/driving/{coords_str}",
+                f"https://apis.mappls.com/advancedmaps/v1/{STATIC_KEY}/route_adv/driving/{coords_str}",
                 params=params,
             )
             resp.raise_for_status()
