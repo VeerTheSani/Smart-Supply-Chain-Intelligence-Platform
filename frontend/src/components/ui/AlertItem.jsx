@@ -1,340 +1,288 @@
-import React, { memo } from 'react';
+import React, { memo, useState } from 'react';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
   AlertCircle,
   Clock,
   MapPin,
-  Zap,
-  TrendingUp,
-  Package,
   Trash2,
   Truck,
   Link2,
   Server,
   Beaker,
+  Star,
+  AlarmClock,
+  Navigation,
+  ShieldAlert,
+  Activity,
+  Info,
+  ChevronRight,
+  Wifi,
+  X,
+  CheckCheck
 } from 'lucide-react';
+import { cn } from '../../lib/utils';
 
 const AlertItem = memo(function AlertItem({
   alert,
   onDismiss,
-  onMarkRead,  // New: callback to mark as read
+  onMarkRead,
+  onFlag,
+  onSnooze,
   variant = 'compact', // 'compact' for popup, 'full' for panel
 }) {
+  const navigate = useNavigate();
+  const [showSnoozeMenu, setShowSnoozeMenu] = useState(false);
+
   if (!alert) return null;
 
-  const getSeverityStyles = (severity) => {
-    switch (severity?.toLowerCase()) {
-      case 'critical':
-        return {
-          badge:
-            'bg-danger/20 text-danger border-danger/30 dark:bg-red-500/10 dark:text-red-400',
-          icon: 'text-danger dark:text-red-400',
-          accent: 'text-danger dark:text-red-400',
-          bg: 'hover:bg-danger/5 dark:hover:bg-red-500/5',
-          border: 'border-danger/20 dark:border-red-500/10',
-          highlight: 'bg-danger/5 border-l-4 border-l-danger',
-        };
-      case 'high':
-        return {
-          badge:
-            'bg-warning/20 text-warning border-warning/30 dark:bg-orange-500/10 dark:text-orange-400',
-          icon: 'text-warning dark:text-orange-400',
-          accent: 'text-warning dark:text-orange-400',
-          bg: 'hover:bg-warning/5 dark:hover:bg-orange-500/5',
-          border: 'border-warning/20 dark:border-orange-500/10',
-          highlight: 'bg-warning/5 border-l-4 border-l-warning',
-        };
-      case 'medium':
-        return {
-          badge:
-            'bg-yellow-500/20 text-yellow-600 border-yellow-500/30 dark:bg-yellow-500/10 dark:text-yellow-400',
-          icon: 'text-yellow-600 dark:text-yellow-400',
-          accent: 'text-yellow-600 dark:text-yellow-400',
-          bg: 'hover:bg-yellow-500/5 dark:hover:bg-yellow-500/5',
-          border: 'border-yellow-500/20 dark:border-yellow-500/10',
-          highlight: '',
-        };
-      default:
-        return {
-          badge:
-            'bg-green-500/20 text-green-600 border-green-500/30 dark:bg-green-500/10 dark:text-green-400',
-          icon: 'text-green-600 dark:text-green-400',
-          accent: 'text-green-600 dark:text-green-400',
-          bg: 'hover:bg-green-500/5 dark:hover:bg-green-500/5',
-          border: 'border-green-500/20 dark:border-green-500/10',
-          highlight: '',
-        };
+  const { id, title, message, severity, timestamp, type, read, flagged, shipment_id } = alert;
+  const isSnoozed = alert.snoozedUntil && new Date(alert.snoozedUntil) > new Date();
+
+  // Location Display Logic
+  const locationName = alert.last_location || alert.location || alert.current_location?.name;
+  const coords = alert.coordinates || (alert.current_location?.lat ? alert.current_location : null);
+
+  const handleViewOnMap = (e) => {
+    e.stopPropagation();
+    if (shipment_id) {
+      navigate(`/shipments?id=${shipment_id}`);
+    } else {
+      navigate('/shipments');
     }
   };
 
-  const getIconForType = (type) => {
-    switch (type?.toLowerCase()) {
+  const getSeverityConfig = (sev) => {
+    switch (sev?.toLowerCase()) {
+      case 'critical':
+        return { icon: ShieldAlert, color: 'text-red-500', bg: 'bg-red-500/10', border: 'border-red-500/20', accent: 'text-red-500' };
+      case 'high':
+        return { icon: ShieldAlert, color: 'text-orange-500', bg: 'bg-orange-500/10', border: 'border-orange-500/20', accent: 'text-orange-500' };
+      case 'medium':
+        return { icon: Activity, color: 'text-blue-500', bg: 'bg-blue-500/10', border: 'border-blue-500/20', accent: 'text-blue-500' };
+      default:
+        return { icon: Info, color: 'text-slate-400', bg: 'bg-slate-400/5', border: 'border-slate-400/10', accent: 'text-slate-400' };
+    }
+  };
+
+  const getIconForType = (t) => {
+    switch (t?.toLowerCase()) {
       case 'risk_alert':
       case 'high_risk_alert':
-        return <AlertTriangle className="w-4 h-4" />;
-      case 'critical_risk':
-        return <AlertTriangle className="w-5 h-5" />;
-      case 'cascade_alert':
-        return <Link2 className="w-4 h-4" />;
-      case 'gps_stuck':
-        return <MapPin className="w-4 h-4" />;
-      case 'api_failure':
-        return <Server className="w-4 h-4" />;
-      case 'reroute_executed':
-        return <Truck className="w-4 h-4" />;
-      case 'shipment_created':
-        return <Package className="w-4 h-4" />;
-      case 'shipment_deleted':
-        return <Trash2 className="w-4 h-4" />;
-      case 'simulator_scenario':
-        return <Beaker className="w-4 h-4" />;
-      default:
-        return <AlertCircle className="w-4 h-4" />;
+      case 'critical_risk': return <AlertTriangle className="w-full h-full" />;
+      case 'cascade_alert':  return <Link2 className="w-full h-full" />;
+      case 'gps_stuck':      return <MapPin className="w-full h-full" />;
+      case 'api_failure':    return <Server className="w-full h-full" />;
+      case 'reroute_executed': return <Truck className="w-full h-full" />;
+      case 'simulator_scenario': return <Beaker className="w-full h-full" />;
+      default:               return <AlertCircle className="w-full h-full" />;
     }
   };
 
-  const formatTime = (timestamp) => {
+  const formatTime = (ts) => {
     try {
-      const date = new Date(timestamp);
+      const date = new Date(ts);
       const now = new Date();
-      const diffMs = now - date;
-      const diffSecs = Math.floor(diffMs / 1000);
-
-      if (diffSecs < 60) return `${diffSecs}s ago`;
+      const diffSecs = Math.floor((now - date) / 1000);
+      if (diffSecs < 60) return 'Just now';
       if (diffSecs < 3600) return `${Math.floor(diffSecs / 60)}m ago`;
       if (diffSecs < 86400) return `${Math.floor(diffSecs / 3600)}h ago`;
-
       return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-    } catch {
-      return '';
-    }
+    } catch { return ''; }
   };
 
-  const styles = getSeverityStyles(alert.severity || alert.level);
+  const config = getSeverityConfig(severity || alert.level);
+  const Icon = config.icon;
 
+  // ======== COMPACT (POPUP) VARIANT ========
   if (variant === 'compact') {
-    // POPUP STYLE - Minimal, dismissible, theme-aware
     return (
       <motion.div
         layout
-        initial={{ opacity: 0, x: 40 }}
-        animate={{ opacity: 1, x: 0 }}
-        exit={{ opacity: 0, x: 40 }}
-        className={`relative group bg-theme-secondary dark:bg-slate-900/80 backdrop-blur-xl border ${styles.border} dark:border-slate-700 rounded-xl p-3 w-[300px] shadow-xl hover:border-accent transition-all`}
+        initial={{ opacity: 0, scale: 0.98 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.98 }}
+        onClick={handleViewOnMap}
+        className={cn(
+          "group relative flex flex-col p-3.5 transition-all duration-200 cursor-pointer border border-theme dark:border-slate-800 rounded-xl",
+          read ? "opacity-60 bg-transparent" : "bg-theme-secondary dark:bg-[#1e293b]/40 shadow-lg hover:border-accent/30",
+          !read && severity === 'critical' && "border-l-4 border-l-red-500"
+        )}
       >
-        {/* Header */}
-        <div className="flex items-start justify-between gap-2 mb-2">
-          <div
-            className={`flex items-center gap-1.5 text-xs font-semibold uppercase ${styles.accent}`}
-          >
-            <span className={styles.icon}>{getIconForType(alert.type)}</span>
-            {alert.source === 'REAL_SYSTEM' ? '🔴 LIVE' : '🧪 SIMULATOR'}
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <div className="flex items-center gap-2">
+            <div className={cn("w-6 h-6 p-1 rounded-lg border border-current/10", config.bg, config.color)}>
+              {getIconForType(type)}
+            </div>
+            <span className="text-[9px] font-black text-theme-secondary dark:text-slate-500 uppercase tracking-widest">
+              {alert.source === 'REAL_SYSTEM' ? 'LIVE FEED' : 'SIMULATION'}
+            </span>
           </div>
-          {onDismiss && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onDismiss(alert.id);
-              }}
-              className="text-theme-secondary dark:text-gray-500 hover:text-theme-primary dark:hover:text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity"
-            >
-              ✕
-            </button>
+          <span className="text-[9px] font-bold text-theme-secondary dark:text-slate-600 uppercase">
+            {formatTime(timestamp)}
+          </span>
+        </div>
+
+        <div className="text-xs font-bold text-theme-primary dark:text-slate-200 line-clamp-2 leading-snug">
+          {alert.shipment_name && (
+            <span className="text-accent mr-1.5 uppercase tracking-tighter">[{alert.shipment_name}]</span>
           )}
-        </div>
-
-        {/* Message */}
-        <div className="text-xs text-theme-secondary dark:text-gray-300 line-clamp-3 mb-2">
-          {alert.message || 'Alert detected'}
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between text-[10px] text-theme-secondary dark:text-gray-500">
-          <span>{alert.shipment_id?.slice(-6) || 'System'}</span>
-          <span>{formatTime(alert.timestamp)}</span>
+          {message?.replace('another ship', 'shipment')}
         </div>
       </motion.div>
     );
   }
 
-  // PANEL STYLE - Full details, theme-aware
+  // ======== FULL (PANEL) VARIANT ========
   return (
     <motion.div
       layout
-      initial={{ opacity: 0, y: 8 }}
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      className={`p-5 border-b border-theme/50 dark:border-slate-800/50 transition-all cursor-pointer relative bg-theme-secondary dark:bg-[#0f172a] ${
-        alert.read ? 'opacity-60 grayscale-[0.3]' : 'opacity-100'
-      } ${styles.bg} ${!alert.read ? styles.highlight : ''}`}
+      exit={{ opacity: 0, scale: 0.95 }}
+      className={cn(
+        "p-4 transition-all cursor-pointer relative bg-theme-secondary dark:bg-[#0f172a] border-b border-theme dark:border-slate-800/50",
+        read ? "opacity-60" : "opacity-100",
+        !read && severity === 'critical' && "bg-red-500/[0.02]",
+        isSnoozed && "opacity-40"
+      )}
+      onClick={() => onMarkRead?.(id)}
     >
-      {/* Status Badges */}
-      <div className="absolute top-4 right-4 flex items-center gap-2">
-        {!alert.read && (
-          <span className="px-1.5 py-0.5 rounded bg-accent text-white text-[8px] font-black uppercase tracking-widest animate-pulse shadow-lg shadow-accent/20">
-            New
-          </span>
-        )}
-        {alert.type === 'reroute_executed' && (
-          <span className="px-1.5 py-0.5 rounded bg-blue-500 text-white text-[8px] font-black uppercase tracking-widest shadow-lg shadow-blue-500/20">
-            Auto-Reroute
-          </span>
-        )}
-      </div>
-
-      <div className="flex gap-3">
-        {/* Icon Badge */}
-        <div
-          className={`mt-1 w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border ${styles.badge}`}
-        >
-          {getIconForType(alert.type)}
+      <div className="flex gap-4">
+        {/* Severity Icon */}
+        <div className={cn(
+          "w-10 h-10 rounded-xl flex items-center justify-center border shrink-0 shadow-sm transition-transform group-hover:scale-105",
+          config.bg, config.color, config.border
+        )}>
+           <div className="w-5 h-5">{getIconForType(type)}</div>
         </div>
 
         {/* Content */}
-        <div className="flex-1 space-y-1.5">
-          {/* Title & Time */}
-          <div className="flex justify-between items-start gap-2">
-            <div>
-              <h4 className={`text-sm font-semibold ${alert.read ? 'text-theme-secondary dark:text-slate-400' : 'text-theme-primary dark:text-slate-200'}`}>
-                {alert.title || alert.message?.split('\n')[0] || 'Alert'}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start justify-between gap-2 mb-1.5">
+            <div className="flex flex-col">
+              <div className="flex items-center gap-2 mb-1">
+                <span className={cn("text-[10px] font-black uppercase tracking-[0.1em]", config.accent)}>
+                  {severity || 'SYSTEM'} LOG
+                </span>
+                <span className="text-[10px] font-bold text-theme-secondary dark:text-slate-600 uppercase tracking-widest">• {alert.source === 'REAL_SYSTEM' ? 'Live' : 'Simulation'}</span>
+              </div>
+              <h4 className={cn(
+                "text-sm font-bold tracking-tight",
+                read ? "text-theme-secondary" : "text-theme-primary"
+              )}>
+                {alert.shipment_name ? (
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-black text-accent dark:text-blue-400 uppercase tracking-widest leading-none mb-1">[{alert.shipment_name}]</span>
+                    <span>{title || message?.split('\n')[0] || 'Anomalous Event'}</span>
+                  </div>
+                ) : (
+                  title || message?.split('\n')[0] || 'Anomalous Event'
+                )}
               </h4>
-              <p className="text-xs text-theme-secondary dark:text-slate-400 mt-0.5">
-                {alert.source === 'REAL_SYSTEM' ? '🔴 Live System' : '🧪 Simulator'}
-              </p>
             </div>
-            <span className="text-xs text-theme-secondary dark:text-slate-400 whitespace-nowrap shrink-0 flex items-center gap-1">
+            <div className="flex items-center gap-1.5 text-[10px] font-bold text-theme-secondary dark:text-slate-500 whitespace-nowrap pt-1">
               <Clock className="w-3 h-3" />
-              {formatTime(alert.timestamp)}
-            </span>
+              {formatTime(timestamp)}
+            </div>
           </div>
 
-          {/* Message */}
-          <p className={`text-sm line-clamp-3 leading-relaxed ${alert.read ? 'text-theme-secondary dark:text-slate-400' : 'text-theme-secondary dark:text-slate-300'}`}>
-            {alert.message}
+          <p className={cn(
+            "text-xs leading-relaxed mb-3",
+            read ? "text-theme-secondary" : "text-theme-primary/90"
+          )}>
+            {message?.replace('another ship', 'shipment')}
           </p>
 
-          {/* Reason (for reroute, risk, cascade alerts) */}
-          {alert.reason && (
-            <div className="mt-2 p-2 rounded-lg bg-accent/5 dark:bg-blue-500/5 border border-accent/10 dark:border-blue-500/10 text-[11px] text-theme-secondary dark:text-slate-300">
-              <span className="font-black text-accent dark:text-blue-400 uppercase tracking-wider">
-                Reason:{' '}
-              </span>
-              {alert.reason}
-            </div>
-          )}
-
-          {/* Reroute Details */}
-          {alert.type === 'reroute_executed' && (
-            <div className="mt-2 space-y-1.5 p-2 rounded-lg bg-theme-tertiary dark:bg-slate-800 border border-theme dark:border-slate-700">
-              <div className="text-[10px] font-black text-accent dark:text-blue-400 uppercase tracking-wider">
-                Route Change Details
-              </div>
-              {alert.original_eta && alert.new_eta && (
-                <div className="flex justify-between text-[11px] text-theme-secondary dark:text-slate-300">
-                  <span>ETA: {alert.original_eta} → {alert.new_eta}</span>
-                  {alert.eta_change && (
-                    <span className={`font-semibold ${
-                      alert.eta_change > 0 ? styles.accent : 'text-green-600 dark:text-green-400'
-                    }`}>
-                      {alert.eta_change > 0 ? '+' : ''}{alert.eta_change}min
-                    </span>
-                  )}
-                </div>
-              )}
-              {alert.distance_change && (
-                <div className="text-[11px] text-theme-secondary dark:text-slate-300">
-                  Distance: {alert.distance_change}
-                </div>
-              )}
-              {alert.cost_impact && (
-                <div className="text-[11px] text-theme-secondary dark:text-slate-300">
-                  Cost Impact: {alert.cost_impact}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Risk Factors */}
-          {alert.factors && alert.factors.length > 0 && (
-            <div className="mt-2 p-2 rounded-lg bg-theme-tertiary dark:bg-slate-800 border border-theme dark:border-slate-700">
-              <div className="text-[10px] font-black text-accent dark:text-blue-400 uppercase tracking-wider mb-1">
-                Risk Factors
-              </div>
-              <div className="space-y-0.5">
-                {alert.factors.map((factor, idx) => (
-                  <div key={idx} className="text-[10px] text-theme-secondary dark:text-slate-300">
-                    • {factor}
+          {/* Integrated Location Detail */}
+          {(type === 'gps_stuck' || locationName || coords) && (
+            <div 
+              onClick={handleViewOnMap}
+              className="mb-3 p-3 rounded-xl bg-theme-tertiary dark:bg-slate-900/50 border border-theme dark:border-slate-800/80 shadow-sm group/loc hover:border-accent/40 transition-all"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-theme-secondary dark:bg-slate-800 flex items-center justify-center text-accent border border-theme dark:border-slate-700">
+                    <MapPin className="w-4 h-4" />
                   </div>
-                ))}
+                  <div className="flex flex-col">
+                    <span className="text-[9px] font-black text-theme-secondary dark:text-slate-500 uppercase tracking-widest leading-none mb-1">Current telemetry</span>
+                    <span className="text-xs font-bold text-theme-primary dark:text-slate-200">
+                      {locationName || (coords ? `${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}` : 'In Transit')}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 text-accent opacity-0 group-hover/loc:opacity-100 transition-all transform translate-x-2 group-hover/loc:translate-x-0">
+                  <span className="text-[10px] font-black uppercase tracking-widest">Intercept</span>
+                  <Navigation className="w-3.5 h-3.5" />
+                </div>
               </div>
             </div>
           )}
 
-          {/* Cascade Details */}
-          {alert.type === 'cascade_alert' && alert.upstream_name && (
-            <div className="mt-2 p-2 rounded-lg bg-theme-tertiary dark:bg-slate-800 border border-theme dark:border-slate-700">
-              <div className="text-[10px] font-black text-accent dark:text-blue-400 uppercase tracking-wider mb-1">
-                Upstream Delay
-              </div>
-              <div className="space-y-0.5 text-[11px] text-theme-secondary dark:text-slate-300">
-                <div>Upstream: {alert.upstream_name}</div>
-                <div>Delay: {alert.delay_minutes}m</div>
-              </div>
-            </div>
-          )}
-
-          {/* GPS Details */}
-          {alert.type === 'gps_stuck' && alert.last_location && (
-            <div className="mt-2 p-2 rounded-lg bg-theme-tertiary dark:bg-slate-800 border border-theme dark:border-slate-700">
-              <div className="text-[10px] font-black text-accent dark:text-blue-400 uppercase tracking-wider mb-1">
-                Last Location
-              </div>
-              <div className="text-[11px] text-theme-secondary dark:text-slate-300">
-                {alert.last_location}
-              </div>
-            </div>
-          )}
-
-          {/* Severity Badge + Shipment ID */}
-          <div className="flex items-center justify-between mt-2 pt-2 border-t border-theme dark:border-slate-700/30">
-            <div className="flex items-center gap-2">
-              <span className={`px-2 py-1 rounded-md text-xs font-semibold uppercase tracking-wider ${styles.badge}`}>
-                {alert.severity || alert.level || 'Info'}
-              </span>
-              {alert.shipment_id && (
-                <span className="text-xs text-theme-secondary dark:text-slate-400 font-mono">
-                  #{alert.shipment_id.slice(-6)}
+          {/* Action Row */}
+          <div className="flex items-center justify-between pt-2 border-t border-theme/30">
+            <div className="flex items-center gap-4">
+              {shipment_id && (
+                <span className="text-[10px] font-black font-mono text-theme-secondary/50 uppercase tracking-tighter">
+                  Log Ref: #{shipment_id.slice(-6)}
                 </span>
               )}
             </div>
+            
+            <div className="flex items-center gap-1 relative">
+              <button
+                onClick={(e) => { e.stopPropagation(); onFlag?.(id); }}
+                className={cn(
+                  "p-2 rounded-lg transition-all",
+                  flagged ? "text-yellow-500 bg-yellow-500/10" : "text-theme-secondary hover:text-yellow-500 hover:bg-yellow-500/5"
+                )}
+              >
+                <Star className={cn("w-4 h-4", flagged && "fill-current")} />
+              </button>
+              
+              <div className="relative">
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowSnoozeMenu(!showSnoozeMenu); }}
+                  className="p-2 rounded-lg text-theme-secondary hover:text-accent hover:bg-accent/10 transition-all"
+                >
+                  <AlarmClock className="w-4 h-4" />
+                </button>
+                {showSnoozeMenu && (
+                  <div className="absolute bottom-full right-0 mb-2 bg-theme-secondary dark:bg-slate-800 border border-theme dark:border-slate-700 rounded-xl shadow-2xl p-1 z-50 min-w-[140px]">
+                    {[
+                      { label: '5 min', mins: 5 },
+                      { label: '1 hour', mins: 60 },
+                      { label: '4 hours', mins: 240 },
+                    ].map((opt) => (
+                      <button
+                        key={opt.mins}
+                        onClick={(e) => { e.stopPropagation(); onSnooze(id, opt.mins); setShowSnoozeMenu(false); }}
+                        className="w-full text-left px-3 py-2 text-[10px] font-bold text-theme-primary dark:text-slate-300 hover:bg-accent/10 rounded-lg transition-all uppercase tracking-widest"
+                      >
+                        ⏱️ {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
 
-            {/* Action Buttons */}
-            <div className="flex items-center gap-1">
-              {!alert.read && onMarkRead && (
+              {!read && (
                 <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onMarkRead(alert.id);
-                  }}
-                  className="text-[10px] px-2 py-0.5 rounded-md text-accent dark:text-blue-400 hover:bg-accent/10 dark:hover:bg-blue-500/10 transition-all font-black uppercase tracking-wider"
-                  title="Mark as read"
+                  onClick={(e) => { e.stopPropagation(); onMarkRead(id); }}
+                  className="px-3 py-1.5 ml-2 rounded-lg bg-theme-tertiary dark:bg-slate-800 text-[10px] font-black text-theme-primary dark:text-slate-200 uppercase tracking-widest border border-theme dark:border-slate-700 hover:bg-accent hover:text-white hover:border-accent transition-all"
                 >
-                  ✓ Mark Read
+                  Acknowledge
                 </button>
               )}
-              {onDismiss && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDismiss(alert.id);
-                  }}
-                  className="text-[10px] px-2 py-0.5 rounded-md text-danger dark:text-red-400 hover:bg-danger/10 dark:hover:bg-red-500/10 transition-all font-black uppercase tracking-wider"
-                  title="Remove from history"
-                >
-                  ✕ Remove
-                </button>
-              )}
+
+              <button
+                onClick={(e) => { e.stopPropagation(); onDismiss?.(id); }}
+                className="p-2 rounded-lg text-theme-secondary hover:text-red-500 hover:bg-red-500/5 transition-all"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
           </div>
         </div>

@@ -4,94 +4,106 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Smart Supply Chain Intelligence Platform — a real-time AI-powered logistics control tower that predicts disruptions and dynamically optimizes shipment routes. Backend is FastAPI (Python async), frontend is React with Leaflet maps. MongoDB for storage, WebSockets for real-time alerts.
+Smart Supply Chain Intelligence Platform — a real-time, AI-powered logistics control tower that predicts disruptions before they happen and dynamically optimizes shipment routes.
+
+- **Frontend**: React + Leaflet (map) + Zustand (state) + React Router v6
+- **Backend**: FastAPI (Python, async) + MongoDB (Motor async driver)
+- **Real-time**: WebSockets via `ConnectionManager` + APScheduler (background loop every 5 mins)
+- **External APIs**: Mappls (routing), Open-Meteo (weather), Gemini 2.0 Flash (event detection), Nominatim (geocoding)
 
 ## Commands
 
 ### Backend
-
 ```bash
 cd backend
-python -m venv venv
-venv\Scripts\activate   # Windows
+python -m venv venv && venv\Scripts\activate
 pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
-# API docs: http://localhost:8000/docs
 ```
 
 ### Frontend
-
 ```bash
 cd frontend
 npm install
-npm run dev     # dev server at http://localhost:5173 (proxies /api and /ws to backend)
-npm run build   # production build
-npm run lint    # ESLint
+npm run dev        # dev server on port 5173
+npm run build      # production build
+```
+
+### Environment Variables (backend/.env)
+```
+MONGODB_URI=mongodb+srv://<user>:<pass>@cluster.mongodb.net/
+DB_NAME=supply_chain
+MAPPLS_CLIENT_ID=your_mappls_client_id
+MAPPLS_CLIENT_SECRET=your_mappls_client_secret
+GEMINI_API_KEY=your_gemini_key
 ```
 
 ## Architecture
 
-### Backend — FastAPI + Motor
-
-- `database.py` — MongoDB Motor async client. All DB access goes through `db` (a `motor.AsyncIOMotorDatabase`). Indexes created on startup in `main.py`.
-- `models.py` — Shared Pydantic models. `ShipmentCreate` / `ShipmentResponse` / `DecisionCreate` etc. Used by both API and scheduler.
-- `main.py` — App entry, CORS, lifespan (starts/stops scheduler), all routers registered here.
-- `routers/` — One file per resource: `shipments.py`, `dashboard.py`, `risk.py`, `reroute.py`, `cascade.py`, `notifications.py`, `scenario.py`, `websocket.py`.
-- `core/scheduler.py` — APScheduler with three jobs:
-  - `recompute_all_shipments` every **5 min** — advances GPS, recalculates risk, decides on auto-reroute, broadcasts alerts
-  - `check_pending_decisions` every **5 s** — checks expired countdowns, executes auto-reroute decisions
-  - `update_gps_positions` every **3 s** — simulates real-time truck movement along route waypoints
-- `core/websocket_manager.py` — `ConnectionManager` singleton. `manager.broadcast(msg)` sends to all connected frontends. Dead connections are pruned silently.
-- `core/countdown_manager.py` — Tracks active countdowns. `start_countdown()` schedules a `countdown_expires_at`; `broadcast_update()` sends remaining seconds to frontend every tick.
-- `services/scoring_thresholds.py` — All risk thresholds and weights. `WEIGHTS` dict sums to 1.0, `RISK_LEVELS` defines score buckets. Change here to tune the risk engine.
-
-### Frontend — React + Zustand + React Query
-
-- `src/stores/` — Zustand stores: `shipmentStore`, `alertStore`, `countdownStore`, `uiStore`. Alert store holds WebSocket messages; countdown store holds `seconds_remaining` per shipment.
-- `src/services/websocket.js` — WebSocket client. Connects to `/ws/alerts`. Sends `"ping"` on interval to keep alive. Dispatches messages to Zustand alert store.
-- `src/api/` — Axios-based API clients. `apiClient.js` is the base instance with interceptors; others (`shipmentApi.js`, `dashboardApi.js`) are resource-specific.
-- `src/components/ui/` — `LiveAlertPanel`, `RiskBreakdown`, `RerouteModal`, `DecisionPanel`, `CascadePanel`, `CountdownBar`.
-- `src/hooks/` — `useAlertWebSocket` (manages WS lifecycle), `useShipments` (React Query), `useDashboard`.
-- Vite proxy: `/api` → `http://localhost:8000`, `/ws` → `ws://localhost:8000`. No CORS issues in dev.
-
-### Risk Engine
-
-`routers/risk_engine.py` calculates 5-factor risk:
-
+### Backend Request Flow
 ```
-Final = (Weather × 0.35) + (Traffic × 0.20) + (Events × 0.25)
-      + (Time Buffer × 0.15) + (Historical × 0.05)
+POST /api/shipments/ → shipments router → geocoding_service → mappls_service → MongoDB
 ```
 
-Levels: LOW ≤30, MEDIUM ≤60, HIGH ≤85, CRITICAL >85. Factors use piecewise thresholds defined in `scoring_thresholds.py`.
+### Background Scheduler (`core/scheduler.py`)
+Runs every 5 minutes for all active shipments (`planned`/`in_transit`/`rerouting`):
+1. Advance GPS via `_advance_location()` — interpolates position along `route_waypoints` using **5x hyper-lapse time multiplier** (frontend visual sync)
+2. Calculate risk via `routers/risk_engine.py` — 5-factor weighted score
+3. Broadcast via WebSocket if risk level changed
+4. **2-minute countdown** for HIGH/CRITICAL shipments with `auto_reroute_enabled=true`, then auto-reroute via `_apply_auto_reroute()`
+5. Cascade propagation — if newly delayed, recursively update children via `upstream_shipment_id`
 
-### Decision / Auto-Reroute Flow
+### Risk Engine (`routers/risk_engine.py`)
+5 weighted factors: `Weather (35%) + Traffic (20%) + Events (25%) + Time Buffer (15%) + Historical (5%)`
+Levels: `LOW (0-30)` · `MEDIUM (30-60)` · `HIGH (60-85)` · `CRITICAL (85-100)`
 
-1. Scheduler detects HIGH/CRITICAL risk + `auto_reroute_enabled=true`
-2. Creates a `pending` decision in MongoDB `decisions` collection with `countdown_expires_at` = now + 120s
-3. Frontend shows countdown bar via `CountdownBar` component driven by `countdownStore`
-4. Scheduler `check_pending_decisions` job fires at expiry → calls `_apply_auto_reroute()` → updates shipment route in MongoDB
-5. Risk dropping to LOW/MEDIUM cancels pending decisions and the countdown
+### WebSocket (`core/websocket_manager.py`)
+- Single shared `manager` instance — imported in routers and scheduler
+- `manager.broadcast(message)` sends to all connected frontends
+- `MAX_CONNECTIONS=100`, `MAX_PER_IP=5`
+- Frontend connects once at `ws://localhost:8000/ws/alerts`
 
-### External APIs
+### Reroute Engine (`routers/reroute_engine.py`)
+- `get_alternatives(shipment)` fetches 3 routes (A/B/C) from Mappls + weather scoring
+- CRITICAL risk + Gemini flag → prefer "Gemini Route" bypass over "Recommended"
 
-- **Mappls** — OAuth2 client credentials flow. `mappls_service.py` fetches token, used for routing + traffic. Requires `MAPPLS_CLIENT_ID` / `MAPPLS_CLIENT_SECRET`.
-- **Open-Meteo** — Free, no key. Forecasts fetched per waypoint at truck's *estimated arrival time*, not current weather.
-- **Gemini 2.0 Flash** — Event detection along route. Called on TTL schedule (2–30 min) to save tokens.
-- **Nominatim** — Free geocoding. Used for both forward (place→coords) and reverse (coords→city names for Gemini context).
+### Cascade System (`core/scheduler.py` `_cascade_propagate`)
+- Delay propagates from parent shipment to children via `upstream_shipment_id` field
+- Stops at depth 5 to prevent runaway recursion
+- Max 50 children per parent per cycle
 
-### MongoDB Collections
+### Frontend State
+- Zustand stores: `alertStore` (unified alerts), `shipmentStore`, `countdownStore`, `uiStore`
+- All alerts normalized on ingest — real alerts tagged `source: "REAL_SYSTEM"`, simulator alerts `source: "SIMULATOR"`
+- WebSocket hook: `useAlertWebSocket.js` — connects, normalizes, deduplicates, syncs read state to backend
 
-- `shipments` — main shipment documents with route, risk, status
-- `decisions` — reroute decision records with status (pending/executed/cancelled)
-- `notifications` — global notification log for the notification panel
-- `shipment_dependencies` — parent/child relationships between shipments (for cascade analysis)
+### Notification Persistence
+- Backend: MongoDB `notifications` collection (per-notification `read` boolean)
+- Frontend: `alertStore` in-memory, calls `POST /api/notifications/{id}/read` on mark-as-read
+- "Mark all read" calls `POST /api/notifications/mark-all-read`
 
-## Non-Obvious Patterns
+## Key Files
 
-- The scheduler uses `SIMULATION_SPEED = 50` to accelerate GPS movement for demo purposes. Real-world deployment needs this removed or reduced.
-- `GEMINI_TTL` per risk level determines how often Gemini is called. LOW=30min, CRITICAL=2min.
-- WebSocket messages use `type` field for frontend dispatch: `risk_alert`, `position_update`, `countdown_tick`, `countdown_expired`, `countdown_cancelled`.
-- `reroute_engine.py` sorts alternatives with "Recommended" first. The scheduler auto-selects this label for auto-reroute.
-- `countdown_expires_at` is stored as a naive datetime in MongoDB; all code normalizes to UTC aware datetimes.
-- `BATCH_SIZE = 10` controls parallelism in `recompute_all_shipments`. Each shipment is error-isolated via `asyncio.gather`.
+| File | Purpose |
+|------|---------|
+| `backend/main.py` | FastAPI app + CORS + lifespan (start/stop scheduler) |
+| `backend/core/scheduler.py` | 5-min background loop, GPS sim, countdown, cascade |
+| `backend/core/websocket_manager.py` | ConnectionManager singleton |
+| `backend/routers/risk_engine.py` | 5-factor risk calculation |
+| `backend/routers/reroute_engine.py` | Mappls alternatives + weather scoring |
+| `backend/models.py` | Pydantic request/response models |
+| `frontend/src/stores/alertStore.js` | Unified alert state + WebSocket integration |
+| `frontend/src/hooks/useAlertWebSocket.js` | WebSocket connection hook |
+| `frontend/src/router/index.jsx` | React Router v6 with lazy-loaded pages |
+
+## Pages (Frontend Routes)
+
+| Path | Page | Notes |
+|------|------|-------|
+| `/` | Dashboard | |
+| `/shipments` | Shipments | |
+| `/disruptions` | Disruptions | |
+| `/routes` | Routes | |
+| `/analytics` | Analytics | |
+| `/scenario-lab` | ScenarioLab | Simulator-only alerts via `source: "SIMULATOR"` |
+| `/settings` | Settings | |

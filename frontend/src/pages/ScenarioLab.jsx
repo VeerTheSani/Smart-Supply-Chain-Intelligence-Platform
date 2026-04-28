@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   FlaskConical, Play, TrendingDown, ShieldCheck, Activity,
   Route, AlertTriangle, Timer, Check, X, Zap, Loader2,
-  Plus, Minus,
+  Plus, Minus, MapPin, Navigation, Info, Clock, AlertCircle
 } from 'lucide-react';
 import { useShipments } from '../hooks/useShipments';
 import { useShipmentStore } from '../stores/shipmentStore';
@@ -13,6 +13,7 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import apiClient from '../api/apiClient';
 import toast from 'react-hot-toast';
+import { cn } from '../lib/utils';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -69,8 +70,6 @@ function CustomZoom() {
   );
 }
 
-/* ── Truck icon (rotatable) ─────────────────────────────────── */
-
 const truckIcon = (angle = 0) => new L.DivIcon({
   className: 'scenario-truck-icon',
   html: `<div class="scenario-truck-wrap" style="transform:rotate(${Math.round(angle)}deg)">
@@ -89,13 +88,8 @@ const truckIcon = (angle = 0) => new L.DivIcon({
 
 function getAngle(from, to) {
   if (!from || !to) return 0;
-  const dx = to.lng - from.lng;
-  const dy = to.lat - from.lat;
-  // atan2 gives angle from east; we want bearing from north → rotate -90
-  return (Math.atan2(dx, dy) * 180 / Math.PI);
+  return (Math.atan2(to.lng - from.lng, to.lat - from.lat) * 180 / Math.PI);
 }
-
-/* ── RealTimeTruck: Purely backend-driven GPS tracking ────── */
 
 function RealTimeTruck({ position, shipmentName, rerouted }) {
   const [angle, setAngle] = useState(0);
@@ -104,7 +98,6 @@ function RealTimeTruck({ position, shipmentName, rerouted }) {
   useEffect(() => {
     if (!position || !prevPosRef.current) return;
     if (position.lat === prevPosRef.current.lat && position.lng === prevPosRef.current.lng) return;
-
     setAngle(getAngle(prevPosRef.current, position));
     prevPosRef.current = position;
   }, [position?.lat, position?.lng]);
@@ -123,12 +116,9 @@ function RealTimeTruck({ position, shipmentName, rerouted }) {
   );
 }
 
-const riskClass = (l) => l === 'CRITICAL' || l === 'HIGH' ? 'text-danger' : l === 'MEDIUM' ? 'text-warning' : 'text-success';
+const riskClass = (l) => l === 'CRITICAL' || l === 'HIGH' ? 'text-red-500' : l === 'MEDIUM' ? 'text-yellow-500' : 'text-emerald-500';
 const fmtDelay = (v) => (!v || v === 0) ? '+0.5h' : `+${v}h`;
-
 const toPos = (arr) => (arr || []).filter(w => w?.lat && w?.lng).map(w => [w.lat, w.lng]);
-
-/* ── Component ───────────────────────────────────────────────── */
 
 const ScenarioLab = memo(function ScenarioLab() {
   const { theme } = useTheme();
@@ -143,26 +133,50 @@ const ScenarioLab = memo(function ScenarioLab() {
   const [error, setError] = useState(null);
   const [mapKey, setMapKey] = useState(0);
 
-  // Countdown
   const [countdown, setCountdown] = useState(0);
   const [simId, setSimId] = useState(null);
   const [decided, setDecided] = useState(false);
   const [countdownActive, setCountdownActive] = useState(false);
-  const [execStatus, setExecStatus] = useState(null); // 'accepted'|'auto_executed'|'cancelled'
+  const [execStatus, setExecStatus] = useState(null);
+  const [decisionLoading, setDecisionLoading] = useState(false);
   const timerRef = useRef(null);
   const autoExecRef = useRef(null);
 
   useEffect(() => { if (shipments.length > 0 && !shipmentId) setShipmentId(shipments[0].id); }, [shipments, shipmentId]);
   useEffect(() => { setMapKey(k => k + 1); }, [theme]);
 
-  // Stable auto-execute ref
+  const handleAccept = useCallback(async () => {
+    if (!simId || decided || decisionLoading) return;
+    setDecisionLoading(true); setCountdownActive(false);
+    clearInterval(timerRef.current);
+    try {
+      await apiClient.post('/api/scenario/accept', { simulation_id: simId });
+      setDecided(true); setExecStatus('accepted');
+      toast.success('Route optimized — applied');
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Accept failed');
+    } finally { setDecisionLoading(false); }
+  }, [simId, decided, decisionLoading]);
+
+  const handleCancel = useCallback(async () => {
+    if (!simId || decided || decisionLoading) return;
+    setDecisionLoading(true); setCountdown(0); setCountdownActive(false);
+    clearInterval(timerRef.current);
+    try {
+      await apiClient.post('/api/scenario/cancel', { simulation_id: simId });
+      setDecided(true); setExecStatus('cancelled');
+      toast.success('Countdown cancelled');
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Cancel failed');
+    } finally { setDecisionLoading(false); }
+  }, [simId, decided, decisionLoading]);
+
   useEffect(() => {
     autoExecRef.current = () => {
-      if (simId && !decided && countdownActive && result?.decision?.action === 'reroute') handleAccept();
+      if (simId && !decided && !decisionLoading && countdownActive && result?.decision?.action === 'reroute') handleAccept();
     };
   });
 
-  // Countdown ticker
   useEffect(() => {
     if (!countdownActive || decided) { clearInterval(timerRef.current); return; }
     if (countdown <= 0) { clearInterval(timerRef.current); autoExecRef.current?.(); return; }
@@ -170,22 +184,16 @@ const ScenarioLab = memo(function ScenarioLab() {
     return () => clearInterval(timerRef.current);
   }, [countdown, decided, countdownActive]);
 
-  /* ── Handlers ──────────────────────────────────────────────── */
-
   const handleRun = async () => {
     if (!shipmentId) return;
     setLoading(true); setResult(null); setError(null); setCountdown(0); setDecided(false);
-    setSimId(null); setCountdownActive(false); setExecStatus(null);
+    setSimId(null); setCountdownActive(false); setExecStatus(null); setDecisionLoading(false);
     try {
       const { data } = await apiClient.post('/api/scenario/run', {
         shipment_id: shipmentId, scenario, severity,
       });
       setResult(data); setSimId(data.simulation_id);
-      if (
-        data.decision?.action === 'reroute' &&
-        data.decision?.countdown > 0 &&
-        ['HIGH', 'CRITICAL'].includes(data.risk?.level)
-      ) {
+      if (data.decision?.action === 'reroute' && data.decision?.countdown > 0 && ['HIGH', 'CRITICAL'].includes(data.risk?.level)) {
         setCountdown(data.decision.countdown);
         setCountdownActive(true);
       }
@@ -195,377 +203,373 @@ const ScenarioLab = memo(function ScenarioLab() {
       const msg = e.response?.data?.detail || e.message || 'Simulation failed';
       setError(msg);
       toast.error(msg);
-      console.error('Simulation failed:', e);
     } finally { setLoading(false); }
   };
 
-  const handleAccept = useCallback(async () => {
-    if (!simId || decided) return;
-    setDecided(true); setCountdownActive(false); setExecStatus('accepted');
-    clearInterval(timerRef.current);
-    try {
-      await apiClient.post('/api/scenario/accept', { simulation_id: simId });
-      toast.success('Route optimized — applied');
-    } catch (e) {
-      toast.error(e.response?.data?.detail || 'Accept failed');
-      console.error(e);
-    }
-  }, [simId, decided]);
-
-  const handleCancel = useCallback(async () => {
-    if (!simId || decided) return;
-    setDecided(true); setCountdown(0); setCountdownActive(false); setExecStatus('cancelled');
-    clearInterval(timerRef.current);
-    try {
-      await apiClient.post('/api/scenario/cancel', { simulation_id: simId });
-      toast.success('Countdown cancelled');
-    } catch (e) {
-      toast.error(e.response?.data?.detail || 'Cancel failed');
-      console.error(e);
-    }
-  }, [simId, decided]);
-
-  /* ── Derived ───────────────────────────────────────────────── */
-
-  const active = shipments.find(s => s.id === shipmentId);
-  const showDecision = result?.decision?.action === 'reroute' && !decided && countdownActive;
-
+  const activeShipment = shipments.find(s => s.id === shipmentId);
   const fitPoints = (() => {
     const orig = toPos(result?.map?.original_route);
     if (orig.length > 1) return orig;
     const ai = toPos(result?.map?.ai_route);
     if (ai.length > 1) return ai;
-    if (active?.current_location?.lat) return [[active.current_location.lat, active.current_location.lng]];
+    if (activeShipment?.current_location?.lat) return [[activeShipment.current_location.lat, activeShipment.current_location.lng]];
     return [];
   })();
 
-  // Hide disruption after reroute executed
   const showDisruption = result?.map?.disruption_zone?.lat && !decided;
 
-  /* ── Render ────────────────────────────────────────────────── */
-
   return (
-    <div className="flex flex-col gap-6">
-      {/* Header */}
-      <div>
-        <motion.h1 initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
-          className="text-3xl font-bold text-theme-primary tracking-tight flex items-center gap-3">
-          <FlaskConical className="w-8 h-8 text-accent" /> Scenario Lab
-        </motion.h1>
-        <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1 }}
-          className="text-theme-secondary mt-1">
-          Controlled disruption simulation &amp; autonomous decision validation
-        </motion.p>
+    <div className="h-[calc(100vh-100px)] flex flex-col gap-6 overflow-hidden">
+      {/* Header Info */}
+      <div className="flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shadow-sm">
+            <FlaskConical className="w-5 h-5" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-theme-primary tracking-tight">Scenario Lab</h1>
+            <p className="text-[10px] font-bold text-theme-secondary uppercase tracking-[0.2em]">Predictive Logistics Simulation</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-4">
+          {execStatus && (
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              className={cn(
+                "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border shadow-sm",
+                execStatus === 'accepted' ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" :
+                  execStatus === 'auto_executed' ? "bg-blue-500/10 text-blue-500 border-blue-500/20" :
+                    "bg-red-500/10 text-red-500 border-red-500/20"
+              )}
+            >
+              {execStatus.replace('_', ' ')}
+            </motion.div>
+          )}
+        </div>
       </div>
 
-      {/* ═══ TOP SECTION: Controls + Map ═══ */}
-      <div className="flex gap-4" style={{ minHeight: 500 }}>
+      <div className="flex-1 flex gap-6 min-h-0">
+        {/* Left: Configuration Sidebar */}
+        <div className="w-80 shrink-0 flex flex-col gap-4 overflow-y-auto custom-scrollbar pr-2">
+          <section className="bg-theme-secondary dark:bg-[#0f172a] border border-theme dark:border-slate-800 rounded-2xl p-5 shadow-sm">
+            <h3 className="text-[10px] font-black text-theme-primary uppercase tracking-[0.2em] mb-5 pb-2 border-b border-theme/50">Configuration</h3>
 
-        {/* ── LEFT: Simulator Panel ─────────────────────────────── */}
-        <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}
-          className="glass-panel rounded-2xl border border-theme flex flex-col gap-4 p-5"
-          style={{ width: 320, minWidth: 320, flexShrink: 0 }}>
+            <div className="space-y-5">
+              <div>
+                <label className="text-[9px] font-black text-theme-secondary uppercase tracking-widest mb-2 block">Target Shipment</label>
+                <select
+                  value={shipmentId}
+                  onChange={(e) => setShipmentId(e.target.value)}
+                  className="w-full bg-theme-tertiary dark:bg-slate-900 border border-theme dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent transition-all"
+                >
+                  {shipments.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.tracking_number} — {s.shipment_name || 'Unnamed'}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          {/* Shipment */}
-          <div>
-            <label className="block text-[10px] font-bold text-theme-secondary uppercase tracking-widest mb-1.5">Target Shipment</label>
-            <select value={shipmentId} onChange={e => setShipmentId(e.target.value)}
-              className="w-full bg-theme-tertiary text-theme-primary border border-theme rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-accent">
-              {shipments.map(s => (
-                <option key={s.id} value={s.id}>{s.shipment_name} ({s.origin_name} → {s.destination_name})</option>
-              ))}
-            </select>
-          </div>
+              <div>
+                <label className="text-[9px] font-black text-theme-secondary uppercase tracking-widest mb-2 block">Disruption Type</label>
+                <div className="grid grid-cols-1 gap-2">
+                  {SCENARIOS.map(s => (
+                    <button
+                      key={s.id}
+                      onClick={() => setScenario(s.id)}
+                      className={cn(
+                        "flex items-center gap-3 px-3 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer",
+                        scenario === s.id
+                          ? "bg-accent/10 border-accent/40 text-accent"
+                          : "bg-theme-tertiary dark:bg-slate-900/50 border-theme dark:border-slate-800 text-theme-secondary hover:bg-theme-tertiary/80"
+                      )}
+                    >
+                      <span className="text-base">{s.icon}</span>
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-          {/* Disruption Type */}
-          <div>
-            <label className="block text-[10px] font-bold text-theme-secondary uppercase tracking-widest mb-1.5">Disruption Type</label>
-            <div className="space-y-1.5">
-              {SCENARIOS.map(s => (
-                <button key={s.id} onClick={() => setScenario(s.id)}
-                  className={`w-full text-left px-3 py-2 rounded-xl border text-sm transition-all flex items-center gap-2 cursor-pointer ${scenario === s.id ? 'border-accent bg-accent/10 text-theme-primary font-bold' : 'border-theme bg-theme-tertiary/50 text-theme-secondary hover:border-theme-secondary/50'}`}>
-                  <span>{s.icon}</span> {s.label}
-                </button>
-              ))}
-            </div>
-          </div>
+              <div>
+                <label className="text-[9px] font-black text-theme-secondary uppercase tracking-widest mb-2 block">Severity Profile</label>
+                <div className="flex p-1 bg-theme-tertiary dark:bg-slate-900 rounded-xl border border-theme dark:border-slate-800">
+                  {SEVERITIES.map(s => (
+                    <button
+                      key={s.id}
+                      onClick={() => setSeverity(s.id)}
+                      className={cn(
+                        "flex-1 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all",
+                        severity === s.id
+                          ? "bg-theme-secondary dark:bg-slate-800 text-theme-primary shadow-sm border border-theme dark:border-slate-700"
+                          : "text-theme-secondary hover:text-theme-primary"
+                      )}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-          {/* Severity */}
-          <div>
-            <label className="block text-[10px] font-bold text-theme-secondary uppercase tracking-widest mb-1.5">Severity</label>
-            <div className="flex gap-2">
-              {SEVERITIES.map(s => (
-                <button key={s.id} onClick={() => setSeverity(s.id)}
-                  className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all cursor-pointer ${severity === s.id ? 'border-accent bg-accent/10 text-theme-primary' : 'border-theme bg-theme-tertiary/50 text-theme-secondary'}`}>
-                  {s.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Decision Alert (inline) */}
-          <AnimatePresence>
-            {showDecision && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                className="rounded-2xl bg-gradient-to-br from-slate-900 to-slate-800 border border-red-500/20 p-4 shadow-xl space-y-3 max-w-[280px]"
+              <button
+                onClick={handleRun}
+                disabled={loading || !shipmentId}
+                className="w-full bg-accent hover:bg-accent/90 disabled:opacity-50 text-white rounded-xl py-3 text-xs font-black uppercase tracking-[0.15em] shadow-lg shadow-accent/20 transition-all flex items-center justify-center gap-2 mt-2 cursor-pointer active:scale-95"
               >
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                Initiate Simulation
+              </button>
+            </div>
+          </section>
 
-                <div className="flex items-center gap-2 text-red-400 font-bold text-xs uppercase tracking-wider">
-                  <AlertTriangle className="w-4 h-4" />
-                  {result?.risk?.level} Risk Detected
-                </div>
-
-                <div className="text-xs text-gray-400">
-                  Recommended: <span className="text-white font-semibold">REROUTE</span>
-                </div>
-
-                <div className="flex items-center justify-between bg-black/30 rounded-lg px-3 py-2">
-                  <div className="flex items-center gap-2 text-yellow-400">
-                    <Timer className="w-4 h-4" />
-                    <span className="text-lg font-bold tabular-nums">{countdown}s</span>
+          <AnimatePresence>
+            {result && !error && (
+              <motion.section
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-theme-secondary dark:bg-[#0f172a] border border-theme dark:border-slate-800 rounded-2xl p-5 shadow-sm"
+              >
+                <h3 className="text-[10px] font-black text-theme-primary uppercase tracking-[0.2em] mb-4 pb-2 border-b border-theme/50">Impact Analysis</h3>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-black text-theme-secondary uppercase tracking-widest">Risk Level</span>
+                    <span className={cn("text-[10px] font-black uppercase tracking-widest", riskClass(result.risk?.level))}>
+                      {result.risk?.level}
+                    </span>
                   </div>
-                  <span className="text-[10px] text-gray-400">auto-execute</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-black text-theme-secondary uppercase tracking-widest">Confidence</span>
+                    <span className="text-[10px] font-black text-theme-primary">{result.risk?.confidence}%</span>
+                  </div>
+                  <div className="pt-2">
+                    <div className="text-[9px] font-black text-theme-secondary uppercase tracking-widest mb-2">Key Anomalies</div>
+                    <div className="space-y-1.5">
+                      {result.risk?.factors?.slice(0, 3).map((f, i) => (
+                        <div key={i} className="flex items-start gap-2 text-[10px] text-theme-primary font-medium leading-tight">
+                          <AlertTriangle className="w-3 h-3 text-yellow-500 shrink-0 mt-0.5" />
+                          {f}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-
-                <div className="h-1.5 bg-gray-700 rounded-full overflow-hidden">
-                  <motion.div
-                    className="h-full bg-red-500"
-                    animate={{
-                      width: `${(countdown / (result?.decision?.countdown || 10)) * 100}%`
-                    }}
-                  />
-                </div>
-
-                <div className="flex gap-2 pt-1">
-                  <button
-                    onClick={handleAccept}
-                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs py-2 rounded-lg font-semibold"
-                  >
-                    Accept
-                  </button>
-                  <button
-                    onClick={handleCancel}
-                    className="flex-1 border border-gray-600 text-gray-400 text-xs py-2 rounded-lg hover:bg-gray-800"
-                  >
-                    Cancel
-                  </button>
-                </div>
-
-              </motion.div>
+              </motion.section>
             )}
           </AnimatePresence>
-          {/* Execution toast (inline) */}
+        </div>
+
+        {/* Right: Map & Results Area */}
+        <div className="flex-1 flex flex-col gap-4 min-w-0">
           <AnimatePresence>
-            {decided && execStatus && (
-              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-                className={`rounded-xl px-4 py-3 border ${execStatus === 'cancelled' ? 'bg-warning/10 border-warning/30' : 'bg-success/10 border-success/30'}`}>
-                <p className={`font-bold text-xs flex items-center gap-2 ${execStatus === 'cancelled' ? 'text-warning' : 'text-success'}`}>
-                  <Zap className="w-4 h-4" />
-                  {execStatus === 'cancelled' ? 'Cancelled — current route kept'
-                    : execStatus === 'auto_executed' ? 'Auto-reroute executed'
-                      : 'Route optimized — applied'}
-                </p>
+            {result && !error && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                className="grid grid-cols-4 gap-4 shrink-0"
+              >
+                <MetricCard label="Latency Shift" value={fmtDelay(result.impact?.delay_hours)} sub="Estimated Arrival" icon={TrendingDown} color="red" />
+                <MetricCard label="Reliability" value={result.risk?.level === 'LOW' ? '98%' : '74%'} sub="Score" icon={ShieldCheck} color="green" />
+                <MetricCard label="Impact" value="Simulation" sub="Analysis" icon={Activity} color="blue" />
+                <MetricCard label="Strategy" value={result.decision?.action === 'reroute' ? 'Optimize' : 'Monitor'} sub="Proposed" icon={Route} color="purple" />
               </motion.div>
             )}
           </AnimatePresence>
 
-          {/* Run button */}
-          <button onClick={handleRun} disabled={loading || !shipmentId}
-            className="w-full py-3 rounded-xl bg-accent text-white font-bold flex items-center justify-center gap-2 hover:bg-accent/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer mt-auto">
-            {loading
-              ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              : <><Play className="w-4 h-4 fill-current" /> Run Simulation</>}
-          </button>
-        </motion.div>
-
-        {/* ── RIGHT: Map ───────────────────────────────────────── */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-          className="flex-1 glass-panel rounded-2xl overflow-hidden border border-theme relative">
-
-          {/* Loading overlay */}
-          <AnimatePresence>
+          <div className="flex-1 relative bg-theme-secondary border border-theme dark:border-slate-800 rounded-2xl overflow-hidden shadow-inner group">
             {loading && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                className="absolute inset-0 z-[600] bg-theme-primary/70 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
+              <div className="absolute inset-0 z-[600] bg-theme-primary/70 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
                 <Loader2 className="w-10 h-10 text-accent animate-spin" />
                 <p className="text-theme-primary font-bold text-sm">Running Simulation…</p>
                 <p className="text-theme-secondary text-xs">Analyzing risk & generating routes</p>
-              </motion.div>
+              </div>
             )}
-          </AnimatePresence>
 
-          {/* Route legend */}
-          <div className="absolute bottom-4 left-4 z-[500] bg-theme-primary/90 backdrop-blur-md px-4 py-2.5 rounded-xl border border-theme shadow-xl space-y-1.5">
-            <span className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-theme-secondary">
-              <div className="w-5 h-[3px] rounded-full bg-gray-400 opacity-50" style={{ borderTop: '2px dashed #9ca3af' }} /> Previous Route
-            </span>
-            <span className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-accent">
-              <div className="w-5 h-[3px] bg-accent rounded-full" /> Active Route
-            </span>
-            {showDisruption && (
-              <span className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-danger">
-                <div className="w-3 h-3 rounded-full bg-danger/30 border border-danger" /> Disruption Zone
-              </span>
+            {result && <CustomZoom />}
+
+            <MapContainer
+              key={`${theme}-${mapKey}`}
+              center={[20, 78]}
+              zoom={5}
+              className="w-full h-full grayscale-[0.2] dark:invert-[0.9] dark:hue-rotate-[180deg] z-0"
+              zoomControl={false}
+            >
+              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              <FitBounds points={fitPoints} />
+
+              {result && (
+                <>
+                  <Polyline positions={toPos(result.map?.original_route)} color="#94a3b8" weight={3} dashArray="5, 8" opacity={0.6} />
+                  <Polyline positions={toPos(result.map?.ai_route)} color="#3b82f6" weight={5} opacity={0.8} />
+
+                  <RealTimeTruck
+                    position={activeShipment?.current_location}
+                    shipmentName={activeShipment?.shipment_name}
+                    rerouted={decided && execStatus !== 'cancelled'}
+                  />
+
+                  {showDisruption && (
+                    <Circle center={[result.map.disruption_zone.lat, result.map.disruption_zone.lng]} radius={15000} pathOptions={{ color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.1, weight: 2 }} />
+                  )}
+                </>
+              )}
+            </MapContainer>
+
+            {/* Decision Logic Overlay */}
+            <AnimatePresence>
+              {result && result.decision?.action === 'reroute' && !decided && countdownActive && (
+                <motion.div
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="absolute bottom-6 right-6 w-[340px] z-[500]"
+                >
+                  <div className="bg-theme-secondary dark:bg-[#0f172a] border border-theme dark:border-slate-800 rounded-2xl overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.3)] backdrop-blur-xl">
+                    <div className="px-5 py-4 bg-gradient-to-r from-accent/20 to-transparent border-b border-theme dark:border-slate-800/80 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Route className="w-4 h-4 text-accent" />
+                        <span className="text-[10px] font-black text-theme-primary uppercase tracking-[0.15em]">Decision Intel</span>
+                      </div>
+                      {countdown > 0 && (
+                        <div className="flex items-center gap-2 px-2 py-1 rounded-lg bg-red-500/10 border border-red-500/20">
+                          <Timer className="w-3.5 h-3.5 text-red-500 animate-pulse" />
+                          <span className="text-[11px] font-mono font-bold text-red-500">{countdown}s</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="p-5 space-y-4">
+                      <p className="text-[11px] font-bold text-theme-primary leading-snug">
+                        Autonomous System recommends <span className="text-accent underline decoration-accent/30 underline-offset-2">Active Rerouting</span> due to predicted risk cascade.
+                      </p>
+
+                      <div className="grid grid-cols-2 gap-3 pt-2">
+                        <div className="p-2 rounded-xl bg-theme-tertiary dark:bg-slate-900 border border-theme dark:border-slate-800 text-center">
+                          <div className="text-[8px] font-black text-theme-secondary uppercase mb-1">Time Delta</div>
+                          <div className="text-xs font-bold text-theme-primary font-mono">{fmtDelay(result.impact?.delay_hours)}</div>
+                        </div>
+                        <div className="p-2 rounded-xl bg-theme-tertiary dark:bg-slate-900 border border-theme dark:border-slate-800 text-center">
+                          <div className="text-[8px] font-black text-theme-secondary uppercase mb-1">Reliability</div>
+                          <div className="text-xs font-bold text-emerald-500 font-mono">+12.4%</div>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2 pt-2">
+                        <button
+                          onClick={handleAccept}
+                          disabled={decisionLoading}
+                          className="flex-1 py-2.5 rounded-xl bg-accent hover:bg-accent/90 text-white text-[10px] font-black uppercase tracking-widest shadow-lg shadow-accent/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                        >
+                          {decisionLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                          Accept
+                        </button>
+                        <button
+                          onClick={handleCancel}
+                          disabled={decisionLoading}
+                          className="flex-1 py-2.5 rounded-xl border border-theme text-theme-secondary hover:text-theme-primary hover:bg-theme-tertiary text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                        >
+                          <X className="w-3 h-3" />
+                          Dismiss
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Map Legend */}
+            {result && (
+              <div className="absolute bottom-6 left-6 z-[500] flex flex-col gap-2">
+                <div className="bg-theme-secondary dark:bg-[#0f172a]/90 backdrop-blur-md border border-theme dark:border-slate-800 rounded-xl px-3 py-2 flex items-center gap-4 shadow-xl">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-0.5 bg-slate-400 opacity-50 border-t border-dashed" />
+                    <span className="text-[9px] font-bold text-theme-secondary uppercase tracking-widest">Baseline</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-1 bg-blue-500 rounded-full" />
+                    <span className="text-[9px] font-bold text-blue-500 uppercase tracking-widest">Simulation</span>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
-
-          {/* Execution toast on map */}
-          <AnimatePresence>
-            {decided && execStatus && execStatus !== 'cancelled' && (
-              <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-                className="absolute top-4 left-4 z-[500] bg-success/10 border border-success/30 backdrop-blur-lg px-4 py-2.5 rounded-xl shadow-xl">
-                <p className="text-success font-bold text-xs flex items-center gap-2">
-                  <Zap className="w-4 h-4" /> Route optimized — decision applied
-                </p>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          <MapContainer key={mapKey} center={[23, 72]} zoom={5} scrollWheelZoom zoomControl={false}
-            style={{ height: '100%', width: '100%', zIndex: 0 }}>
-            <TileLayer
-              attribution={theme === 'dark' ? '&copy; CartoDB' : '&copy; OSM'}
-              url={theme === 'dark'
-                ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-                : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'} />
-
-            <FitBounds points={fitPoints} />
-            <CustomZoom />
-<div className="absolute top-4 left-4 z-[500] bg-black/70 text-white text-[10px] px-3 py-1 rounded-full">
-  AI Route Optimization View
-</div>
-            {/* Original route — gray dashed (faded) */}
-            {toPos(result?.map?.original_route).length > 1 && (
-              <Polyline
-                positions={toPos(result?.map?.original_route)}
-                pathOptions={{
-                  color: "#94a3b8",
-                  weight: 3,
-                  dashArray: "6 6",
-                  opacity: 0.4
-                }}
-              />
-            )}
-
-            {/* Pre-sim route */}
-            {!result && toPos(active?.route_waypoints).length > 1 && (
-              <Polyline
-                positions={toPos(active.route_waypoints)}
-                pathOptions={{ color: '#3b82f6', weight: 5, opacity: 1 }} />
-            )}
-
-            {/* AI route — blue bold */}
-            {toPos(result?.map?.ai_route).length > 1 && (
-              <Polyline
-                positions={toPos(result.map.ai_route)}
-                pathOptions={{
-                  color: "#2563eb",
-                  weight: 6,
-                  opacity: 1
-                }} />
-            )}
-
-            {/* Disruption zone — fades after reroute */}
-            {result?.map?.disruption_zone?.lat && result?.map?.disruption_zone?.lng && (
-              <Circle center={[result.map.disruption_zone.lat, result.map.disruption_zone.lng]}
-                radius={15000}
-                pathOptions={{
-                  color: '#ef4444', fillColor: '#ef4444',
-                  fillOpacity: decided ? 0.03 : 0.15,
-                  weight: decided ? 1 : 2,
-                  dashArray: '6, 4',
-                  opacity: decided ? 0.2 : 1,
-                }}>
-                <Popup><span className="font-bold text-sm">⚠️ Simulated Disruption Zone</span></Popup>
-              </Circle>
-            )}
-
-            {/* Real-time truck marker */}
-            <RealTimeTruck
-              position={active?.current_location}
-              shipmentName={active?.shipment_name}
-              rerouted={decided && execStatus !== 'cancelled'}
-            />
-          </MapContainer>
-        </motion.div>
+        </div>
       </div>
 
-      {/* ═══ BOTTOM SECTION: Results ═══ */}
+      {/* Comparison Results */}
       <AnimatePresence>
         {result && (
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}
-            className="grid grid-cols-1 md:grid-cols-3 gap-4">
-
-            {/* Human Baseline */}
-            <div className="glass-panel p-5 rounded-2xl border border-theme relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-3 opacity-5"><Route className="w-20 h-20" /></div>
-              <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-theme-secondary mb-3">Human Baseline</h3>
-              <div className="space-y-3">
-                <div>
-                  <p className="text-xs text-theme-secondary">Strategy</p>
-                  <p className="font-bold text-theme-primary text-sm">Current Route (No Action)</p>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <p className="text-xs text-theme-secondary">Risk</p>
-                    <p className={`font-black text-lg ${riskClass(result.comparison.human.risk_level)}`}>
-                      {result.comparison.human.risk_score.toFixed(1)}
-                    </p>
-                    <p className={`text-[10px] font-bold ${riskClass(result.comparison.human.risk_level)}`}>{result.comparison.human.risk_level}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-theme-secondary">Delay</p>
-                    <p className="font-black text-lg text-danger">{fmtDelay(result.comparison.human.delay)}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* AI Optimized */}
-            <div className="glass-panel p-5 rounded-2xl border border-accent relative overflow-hidden shadow-[0_0_30px_rgba(59,130,246,0.08)]">
-              <div className="absolute top-0 right-0 p-3 opacity-5"><Activity className="w-20 h-20" /></div>
-              <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-accent mb-3">AI Optimized</h3>
-              <div className="space-y-3">
-                <div>
-                  <p className="text-xs text-accent/70">Strategy</p>
-                  <p className="font-bold text-theme-primary text-sm">Dynamic Reroute</p>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <p className="text-xs text-accent/70">Risk</p>
-                    <p className={`font-black text-lg ${riskClass(result.comparison.ai.risk_level)}`}>
-                      {result.comparison.ai.risk_score.toFixed(1)}
-                    </p>
-                    <p className={`text-[10px] font-bold ${riskClass(result.comparison.ai.risk_level)}`}>{result.comparison.ai.risk_level}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-accent/70">Delay</p>
-                    <p className="font-black text-lg text-theme-primary">{fmtDelay(result.comparison.ai.delay)}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Impact */}
-            <div className="glass-panel p-5 rounded-2xl border border-theme flex flex-col justify-center gap-5 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-28 h-28 bg-success/10 blur-3xl rounded-full" />
-              <div>
-                <p className="text-xs text-theme-secondary flex items-center gap-1.5"><TrendingDown className="w-4 h-4 text-success" /> Delay Reduction</p>
-                <p className="text-3xl font-black text-theme-primary tracking-tight">{result.impact.delay_reduction_percent}%</p>
-              </div>
-              <div>
-                <p className="text-xs text-theme-secondary flex items-center gap-1.5"><ShieldCheck className="w-4 h-4 text-success" /> Risk Reduced By</p>
-                <p className="text-3xl font-black text-theme-primary tracking-tight">{result.impact.risk_reduction} pts</p>
-              </div>
-            </div>
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 md:grid-cols-3 gap-4 shrink-0">
+            <ComparisonCard title="Human Baseline" data={result.comparison?.human} variant="neutral" />
+            <ComparisonCard title="AI Optimized" data={result.comparison?.ai} variant="accent" />
+            <ImpactSummaryCard impact={result.impact} />
           </motion.div>
         )}
       </AnimatePresence>
     </div>
   );
 });
+
+function MetricCard({ label, value, sub, icon: Icon, color }) {
+  const colors = {
+    red: "bg-red-500/10 text-red-500 border-red-500/20 shadow-red-500/5",
+    green: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20 shadow-emerald-500/5",
+    blue: "bg-blue-500/10 text-blue-500 border-blue-500/20 shadow-blue-500/5",
+    purple: "bg-purple-500/10 text-purple-500 border-purple-500/20 shadow-purple-500/5",
+  };
+  return (
+    <motion.div className="bg-theme-secondary dark:bg-[#0f172a] border border-theme dark:border-slate-800 rounded-2xl p-4 flex items-center gap-4 shadow-sm">
+      <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center border shadow-inner", colors[color])}>
+        <Icon className="w-6 h-6" />
+      </div>
+      <div className="flex flex-col">
+        <span className="text-[9px] font-black text-theme-secondary uppercase tracking-[0.15em] mb-1">{label}</span>
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-lg font-black text-theme-primary">{value}</span>
+          <span className="text-[10px] font-bold text-theme-secondary uppercase">{sub}</span>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function ComparisonCard({ title, data, variant }) {
+  if (!data) return null;
+  return (
+    <div className={cn(
+      "p-5 rounded-2xl border relative overflow-hidden",
+      variant === 'accent' ? "bg-accent/5 border-accent/20" : "bg-theme-secondary dark:bg-[#0f172a] border-theme dark:border-slate-800"
+    )}>
+      <h3 className={cn("text-[10px] font-black uppercase tracking-[0.2em] mb-4", variant === 'accent' ? "text-accent" : "text-theme-secondary")}>{title}</h3>
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <p className="text-xs text-theme-secondary mb-1">Risk Score</p>
+          <p className={cn("text-xl font-black", riskClass(data.risk_level))}>{data.risk_score?.toFixed(1)}</p>
+          <p className={cn("text-[10px] font-black uppercase", riskClass(data.risk_level))}>{data.risk_level}</p>
+        </div>
+        <div>
+          <p className="text-xs text-theme-secondary mb-1">Est. Delay</p>
+          <p className="text-xl font-black text-theme-primary">{fmtDelay(data.delay)}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ImpactSummaryCard({ impact }) {
+  if (!impact) return null;
+  return (
+    <div className="bg-emerald-500/5 border border-emerald-500/20 p-5 rounded-2xl flex flex-col justify-center gap-4">
+      <div>
+        <p className="text-xs text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-2 uppercase tracking-widest"><TrendingDown className="w-4 h-4" /> Delay Reduced</p>
+        <p className="text-3xl font-black text-theme-primary">{impact.delay_reduction_percent}%</p>
+      </div>
+      <div>
+        <p className="text-xs text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-2 uppercase tracking-widest"><ShieldCheck className="w-4 h-4" /> Risk Reduction</p>
+        <p className="text-3xl font-black text-theme-primary">{impact.risk_reduction} pts</p>
+      </div>
+    </div>
+  );
+}
 
 export default ScenarioLab;

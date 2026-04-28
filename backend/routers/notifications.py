@@ -26,6 +26,12 @@ async def get_notifications():
 @router.post("/{notification_id}/read")
 async def mark_read(notification_id: str):
     try:
+        # Client-side IDs might not be valid ObjectIds (e.g. from alertStore)
+        # We only update in DB if it's a valid ObjectId
+        if not ObjectId.is_valid(notification_id):
+            logger.info(f"Notification ID {notification_id} is not a valid ObjectId, skipping DB update (likely client-side alert)")
+            return {"status": "skipped", "message": "Client-side alert not in database"}
+
         result = await db.notifications.update_one(
             {"_id": ObjectId(notification_id)},
             {"$set": {"read": True}}
@@ -33,6 +39,8 @@ async def mark_read(notification_id: str):
         if result.matched_count == 0:
             raise HTTPException(status_code=404, detail="Notification not found")
         return {"status": "success"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error marking notification as read: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")

@@ -251,6 +251,20 @@ function handleSimulatorAlert(msg, callbacks) {
       });
       break;
 
+    case 'decision_triggered':
+      callbacks.addSimAlert({
+        id: `sim-decision-${msg.timestamp}-${msg.shipment_id}`,
+        ...msg,
+      });
+      break;
+
+    case 'countdown_cancelled':
+      callbacks.addSimAlert({
+        id: `sim-cancel-${msg.timestamp}-${msg.shipment_id}`,
+        ...msg,
+      });
+      break;
+
     default:
       console.warn(`[WS] Unhandled simulator alert type: ${type}`);
   }

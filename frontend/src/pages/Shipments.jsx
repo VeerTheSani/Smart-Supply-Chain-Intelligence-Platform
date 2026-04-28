@@ -1,4 +1,5 @@
 import { memo, useState, useMemo, useRef, useEffect, Fragment } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Package, ShieldAlert, Navigation, Search, Filter, Plus, Pencil, Trash2, X, ChevronDown, ChevronUp, Eye, Loader2 } from 'lucide-react';
 import { AreaChart, Area, ResponsiveContainer, YAxis } from 'recharts';
@@ -134,6 +135,7 @@ const DependencyLines = memo(function DependencyLines({ shipments }) {
 });
 
 const Shipments = memo(function Shipments() {
+  const [searchParams] = useSearchParams();
   const { isLoading, error } = useShipments();
   const shipments = useShipmentStore(state => state.shipments);
   const deleteMutation = useDeleteShipment();
@@ -149,6 +151,19 @@ const Shipments = memo(function Shipments() {
   const [expandedId, setExpandedId]       = useState(null);
 
   const filterRef = useRef(null);
+
+  // Deep Link Handling
+  useEffect(() => {
+    const shipmentId = searchParams.get('id');
+    if (shipmentId && shipments?.length > 0) {
+      const target = shipments.find(s => s.id === shipmentId || s.tracking_number === shipmentId);
+      if (target) {
+        setInspectingShipmentId(target.id);
+        setSearchQuery(target.tracking_number);
+      }
+    }
+  }, [searchParams, shipments, setInspectingShipmentId]);
+
   useEffect(() => {
     const handler = (e) => {
       if (filterRef.current && !filterRef.current.contains(e.target)) {

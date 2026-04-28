@@ -181,9 +181,9 @@ const Analytics = memo(function Analytics() {
             </div>
           </div>
           
-           <div className="flex-1 min-h-[300px]">
+           <div className="flex-1" style={{ minHeight: 350 }}>
              {riskTrendData.length > 0 ? (
-               <ResponsiveContainer width="100%" height="100%">
+               <ResponsiveContainer width="100%" height="100%" minWidth={0} aspect={2.5}>
                  <AreaChart data={riskTrendData}>
                    <defs>
                      <linearGradient id="colorRiskAvg" x1="0" y1="0" x2="0" y2="1">
@@ -259,9 +259,9 @@ const Analytics = memo(function Analytics() {
             <p className="text-xs text-theme-secondary mt-1">Risk severity distribution.</p>
           </div>
           
-          <div className="flex-1 min-h-[300px] flex items-center justify-center">
+          <div className="flex-1" style={{ minHeight: 300 }}>
             {riskDistribution.some(d => d.value > 0) ? (
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                 <PieChart>
                   <Pie
                     data={riskDistribution}
@@ -307,9 +307,9 @@ const Analytics = memo(function Analytics() {
             </h3>
           </div>
           
-          <div className="min-h-[250px]">
+          <div style={{ minHeight: 250 }}>
              {statusDistribution.length > 0 ? (
-               <ResponsiveContainer width="100%" height="100%">
+               <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                  <BarChart data={statusDistribution} layout="vertical" margin={{ top: 0, right: 30, left: 20, bottom: 0 }}>
                    <CartesianGrid strokeDasharray="3 3" horizontal={false} className="text-theme-tertiary opacity-10" />
                    <XAxis type="number" stroke="currentColor" className="text-theme-secondary text-xs" tickLine={false} axisLine={false} />
