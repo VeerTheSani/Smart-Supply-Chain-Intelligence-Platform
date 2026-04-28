@@ -123,6 +123,7 @@ async def geocode(place_name: str) -> dict:
     Convert a place name to coordinates using Mappls geocoding API.
     Returns {"lat": float, "lng": float, "display_name": str}
     """
+    place_name = " ".join(place_name.split())  # normalise whitespace
     token = await get_token()
 
     try:
@@ -132,12 +133,15 @@ async def geocode(place_name: str) -> dict:
                 params={"address": place_name},
                 headers={"Authorization": f"Bearer {token}"}
             )
-            resp.raise_for_status()
+            if resp.status_code != 200:
+                logger.error(f"Mappls geocode HTTP {resp.status_code} for '{place_name}': {resp.text[:200]}")
+                return {"lat": 28.6139, "lng": 77.2090, "display_name": f"{place_name} (Fallback)"}
             data = resp.json()
 
-        results = data.get("copResults", [])
+        results = data.get("copResults") or []
         if not results:
-            raise ValueError(f"Could not geocode '{place_name}' — place not found")
+            logger.warning(f"Mappls geocode empty results for '{place_name}'. Response: {data}")
+            return {"lat": 28.6139, "lng": 77.2090, "display_name": f"{place_name} (Fallback)"}
 
         top = results[0]
         return {
@@ -146,13 +150,11 @@ async def geocode(place_name: str) -> dict:
             "display_name": top.get("formattedAddress", place_name),
         }
 
-    except ValueError:
-        raise
     except httpx.TimeoutException:
         logger.error(f"Mappls geocoding timed out for '{place_name}'")
         return {"lat": 28.6139, "lng": 77.2090, "display_name": f"{place_name} (Fallback)"}
     except Exception as e:
-        logger.error(f"Mappls geocoding failed for '{place_name}': {e}. Using fallback.")
+        logger.error(f"Mappls geocoding failed for '{place_name}': {type(e).__name__}: {e}. Using fallback.")
         return {"lat": 28.6139, "lng": 77.2090, "display_name": f"{place_name} (Fallback)"}
 
 

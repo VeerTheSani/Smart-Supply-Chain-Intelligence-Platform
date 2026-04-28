@@ -26,7 +26,9 @@ class RiskAssessment(BaseModel):
 class ShipmentCreate(BaseModel):
     shipment_name: str = Field(..., min_length=1, max_length=200)
     origin_name: str = Field(..., min_length=1, max_length=200)
+    origin_coords: Optional[Coordinates] = None
     destination_name: str = Field(..., min_length=1, max_length=200)
+    destination_coords: Optional[Coordinates] = None
     via_points: Optional[List[ViaPoint]] = []
     auto_reroute_enabled: bool = False
     system_mode: Literal["REAL", "SIM"] = "REAL"  # REAL=production, SIM=scenario lab

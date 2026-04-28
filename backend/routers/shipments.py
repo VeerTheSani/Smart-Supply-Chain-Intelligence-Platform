@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 
 from database import db
 from models import ShipmentCreate, ShipmentUpdate
-from services.mappls_service import geocode
+from services.geocoding_service import geocode
 from services.mappls_service import get_route
 
 logger = logging.getLogger(__name__)
@@ -159,12 +159,24 @@ async def create_shipment(data: ShipmentCreate, background_tasks: BackgroundTask
     # Input sanitization handled by Pydantic Model (ShipmentCreate)
 
     try:
-        origin_geo = await geocode(data.origin_name)
-        dest_geo   = await geocode(data.destination_name)
+        # Use frontend-provided coordinates if available, else geocode
+        if data.origin_coords:
+            origin_geo = {"lat": data.origin_coords.lat, "lng": data.origin_coords.lng, "display_name": data.origin_name}
+        else:
+            origin_geo = await geocode(data.origin_name)
+
+        if data.destination_coords:
+            dest_geo = {"lat": data.destination_coords.lat, "lng": data.destination_coords.lng, "display_name": data.destination_name}
+        else:
+            dest_geo   = await geocode(data.destination_name)
+
         via_geos   = []
         if data.via_points:
-            import asyncio
-            via_geos = await asyncio.gather(*(geocode(vp.location_name) for vp in data.via_points))
+            async def _get_geo(vp):
+                if vp.coords:
+                    return {"lat": vp.coords.lat, "lng": vp.coords.lng, "display_name": vp.location_name}
+                return await geocode(vp.location_name)
+            via_geos = await asyncio.gather(*(_get_geo(vp) for vp in data.via_points))
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except RuntimeError as e:

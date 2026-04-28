@@ -241,7 +241,8 @@ const AnimatedLiveTruck = memo(function AnimatedLiveTruck({ shipment, isSelected
             </span>
           </div>
           {shipment.risk?.current?.reason &&
-            !shipment.risk.current.reason.toLowerCase().includes('unavailable') && (
+            !shipment.risk.current.reason.toLowerCase().includes('unavailable') &&
+            !shipment.risk.current.reason.toLowerCase().includes('not available') && (
               <div className="bg-danger/10 mt-1 p-1 rounded border border-danger/20 text-danger text-[9px]">
                 ⚠️ {shipment.risk.current.reason}
               </div>
