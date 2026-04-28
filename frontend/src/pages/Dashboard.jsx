@@ -271,6 +271,8 @@ const Dashboard = memo(function Dashboard() {
   // This covers: newly created shipments where TomTom hasn't returned yet,
   // and old shipments that predate the incident storage feature.
   useEffect(() => {
+    const { shipments } = useShipmentStore.getState();
+    
     shipments.forEach(s => {
       if ((s.route_incidents?.length ?? 0) > 0) return;  // already have data
       if (incidentOverride[s.id] !== undefined) return;   // already fetched this session
@@ -279,17 +281,19 @@ const Dashboard = memo(function Dashboard() {
       setIncidentOverride(prev => ({ ...prev, [s.id]: prev[s.id] ?? null }));
       setFetchingIncidents(n => n + 1);
 
-      fetch(`/api/shipments/${s.id}/incidents`)
-        .then(r => r.json())
-        .then(json => {
-          if (json.incidents?.length > 0) {
-            setIncidentOverride(prev => ({ ...prev, [s.id]: json.incidents }));
-          }
-        })
-        .catch(() => { })
-        .finally(() => setFetchingIncidents(n => Math.max(0, n - 1)));
+      import('../api/apiClient').then(module => {
+        const apiClient = module.default;
+        apiClient.get(`/api/shipments/${s.id}/incidents`)
+          .then(resp => {
+            if (resp.data?.incidents?.length > 0) {
+              setIncidentOverride(prev => ({ ...prev, [s.id]: resp.data.incidents }));
+            }
+          })
+          .catch(() => { })
+          .finally(() => setFetchingIncidents(n => Math.max(0, n - 1)));
+      });
     });
-  }, [shipments]);
+  }, [shipments, incidentOverride]);
 
   const handleMarkerClick = (shipmentId) => {
     setSelectedId(prev => prev === shipmentId ? null : shipmentId);
