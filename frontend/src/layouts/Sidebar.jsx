@@ -1,5 +1,5 @@
 import { memo, useMemo } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard,
@@ -32,9 +32,12 @@ const SidebarLink = memo(function SidebarLink({ item, collapsed, onNavigate }) {
   const Icon = item.icon;
 
   return (
-    <NavLink
-      to={item.path}
-      onClick={onNavigate}
+    <a
+      href={item.path}
+      onClick={(e) => {
+        // We still call onNavigate for mobile sidebar closing
+        if (onNavigate) onNavigate();
+      }}
       className={cn(
         'group flex items-center gap-3 px-4 py-3 rounded-2xl text-[13px] font-bold transition-all duration-300 relative overflow-hidden',
         isActive
@@ -74,7 +77,7 @@ const SidebarLink = memo(function SidebarLink({ item, collapsed, onNavigate }) {
           transition={{ type: 'spring', stiffness: 300, damping: 30 }}
         />
       )}
-    </NavLink>
+    </a>
   );
 });
 
