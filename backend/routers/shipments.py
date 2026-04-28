@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 
 from database import db
 from models import ShipmentCreate, ShipmentUpdate
-from services.geocoding_service import geocode
+from services.mappls_service import geocode
 from services.mappls_service import get_route
 
 logger = logging.getLogger(__name__)
