@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchShipments, createShipment, updateShipment, deleteShipment, fetchRerouteData, scoreRerouteAlternatives } from '../api/shipmentApi';
+import { fetchShipments, createShipment, updateShipment, deleteShipment, fetchRerouteData, scoreRerouteAlternatives, applyReroute } from '../api/shipmentApi';
 
 /**
  * Hook for fetching and managing all shipments.
@@ -69,5 +69,16 @@ export const useRerouting = (shipmentId, options = {}) => {
 export const useScoreReroute = () => {
   return useMutation({
     mutationFn: ({ id, alternatives }) => scoreRerouteAlternatives(id, alternatives),
+  });
+};
+
+/**
+ * Hook for applying a concrete alternative route logic, completely bypassing current state.
+ */
+export const useApplyReroute = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }) => applyReroute(id, payload),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['shipments'] }),
   });
 };

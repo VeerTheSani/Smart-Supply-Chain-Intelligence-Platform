@@ -113,7 +113,7 @@ async def get_cascade(
     # Validate shipment exists
     shipment = await db.shipments.find_one(
         {"_id": _to_id(shipment_id)},
-        {"shipment_name": 1}
+        {"shipment_name": 1, "upstream_shipment_id": 1}
     )
     if not shipment:
         raise HTTPException(status_code=404, detail="Shipment not found")
@@ -124,8 +124,31 @@ async def get_cascade(
         sum(d["delay_exposure_hours"] for d in dependent_shipments), 2
     )
 
+    # Upstream lookup: what does THIS shipment depend on?
+    upstream = None
+    upstream_id_str = shipment.get("upstream_shipment_id")
+    if upstream_id_str:
+        try:
+            upstream_doc = await db.shipments.find_one(
+                {"_id": ObjectId(upstream_id_str)},
+                {"shipment_name": 1, "status": 1, "eta_hours": 1,
+                 "is_delayed": 1, "delay_minutes": 1}
+            )
+            if upstream_doc:
+                upstream = {
+                    "id":            str(upstream_doc["_id"]),
+                    "shipment_name": upstream_doc.get("shipment_name", "Unknown"),
+                    "status":        upstream_doc.get("status", "unknown"),
+                    "eta_hours":     upstream_doc.get("eta_hours"),
+                    "is_delayed":    upstream_doc.get("is_delayed", False),
+                    "delay_minutes": upstream_doc.get("delay_minutes", 0),
+                }
+        except Exception as e:
+            logger.warning(f"Failed to fetch upstream shipment {upstream_id_str}: {e}")
+
     return {
-        "shipment_id": shipment_id,
-        "dependent_shipments": dependent_shipments,
+        "shipment_id":              shipment_id,
+        "upstream":                 upstream,
+        "dependent_shipments":      dependent_shipments,
         "total_delay_exposure_hours": total_delay_exposure,
     }

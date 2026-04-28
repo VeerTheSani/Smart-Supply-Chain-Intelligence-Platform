@@ -74,3 +74,13 @@ export const scoreRerouteAlternatives = async (shipmentId, alternatives) => {
   );
   return data;
 };
+
+/**
+ * Applies a selected alternative route to the active shipment.
+ * @param {string} shipmentId 
+ * @param {Object} payload The alternative route geometry and metadata 
+ */
+export const applyReroute = async (shipmentId, payload) => {
+  const { data } = await apiClient.post(`/api/reroute/${shipmentId}/apply`, payload);
+  return data;
+};

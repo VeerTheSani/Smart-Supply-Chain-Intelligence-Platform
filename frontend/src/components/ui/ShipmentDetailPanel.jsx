@@ -5,6 +5,7 @@ import RiskBreakdown from './RiskBreakdown';
 import CascadePanel from './CascadePanel';
 import CountdownBar from './CountdownBar';
 import apiClient from '../../api/apiClient';
+import { useShipmentStore } from '../../stores/shipmentStore';
 import { cn } from '../../lib/utils';
 
 /**
@@ -17,6 +18,18 @@ import { cn } from '../../lib/utils';
 const ShipmentDetailPanel = memo(function ShipmentDetailPanel({ shipment, onClose, onReroute }) {
   const [riskData, setRiskData] = useState(null);
   const [loadingRisk, setLoadingRisk] = useState(false);
+
+  const allShipments = useShipmentStore(s => s.shipments);
+  const upstreamShipment = shipment?.upstream_shipment_id
+    ? allShipments.find(s => s.id === shipment.upstream_shipment_id)
+    : null;
+  // Effective departure: prefer stored field, fall back to upstream's original_eta from store
+  const departureDt = shipment?.scheduled_departure
+    ? new Date(shipment.scheduled_departure)
+    : upstreamShipment?.original_eta
+      ? new Date(upstreamShipment.original_eta)
+      : null;
+  const upstreamName = shipment?.upstream_shipment_name || upstreamShipment?.shipment_name || 'Upstream shipment';
 
   // Fetch full risk assessment from backend when panel opens
   useEffect(() => {
@@ -152,10 +165,76 @@ const ShipmentDetailPanel = memo(function ShipmentDetailPanel({ shipment, onClos
               <div className="glass-panel rounded-2xl border border-theme p-4 text-center bg-theme-tertiary/10">
                 <p className="text-[9px] text-theme-secondary uppercase tracking-[0.15em] font-black opacity-50">ETA</p>
                 <p className="text-[11px] font-black text-theme-primary mt-2 uppercase tracking-widest">
-                  {shipment.eta_hours ? `${shipment.eta_hours}h` : '—'}
+                  {(() => {
+                    const own = parseFloat(shipment.eta_hours) || 0;
+                    const wait = shipment.scheduled_departure
+                      ? Math.max(0, (new Date(shipment.scheduled_departure) - Date.now()) / 3_600_000)
+                      : 0;
+                    const total = wait + own;
+                    if (!total) return '—';
+                    const d = Math.floor(total / 24);
+                    const remH = Math.floor(total % 24);
+                    return d > 0 ? `${d}d ${remH}h` : `${remH}h`;
+                  })()}
                 </p>
               </div>
             </div>
+
+            {/* Departure timeline — shown only for dependent shipments */}
+            {departureDt && (
+              <div className="bg-blue-500/5 border border-blue-500/20 rounded-2xl p-4">
+                <p className="text-[9px] font-black text-blue-400 uppercase tracking-[0.12em] mb-3">
+                  Departure Timeline
+                </p>
+                <div className="space-y-0">
+                  {/* Upstream arrives */}
+                  <div className="flex items-center gap-3">
+                    <div className="w-2 h-2 rounded-full bg-blue-400 shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-[10px] text-theme-secondary font-bold">
+                        {upstreamName} arrives
+                      </p>
+                    </div>
+                    <p className="text-[10px] font-mono text-theme-primary">
+                      {departureDt.toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
+                    </p>
+                  </div>
+                  <div className="ml-[3px] w-px h-4 bg-blue-400/30" />
+
+                  {/* This shipment departs */}
+                  <div className="flex items-center gap-3">
+                    <div className="w-2 h-2 rounded-full bg-accent shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-[10px] text-theme-secondary font-bold">This shipment departs</p>
+                      <p className="text-[9px] text-theme-secondary opacity-60">
+                        Travel: {shipment.eta_hours}h
+                      </p>
+                    </div>
+                    <p className="text-[10px] font-mono text-theme-primary">
+                      {departureDt.toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
+                    </p>
+                  </div>
+                  <div className="ml-[3px] w-px h-4 bg-accent/30" />
+
+                  {/* Estimated arrival */}
+                  <div className="flex items-center gap-3">
+                    <div className="w-2 h-2 rounded-full bg-green-400 shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-[10px] text-theme-secondary font-bold">Estimated arrival</p>
+                      {shipment.is_delayed && (
+                        <p className="text-[9px] text-red-400 font-bold">
+                          +{(shipment.delay_minutes / 60).toFixed(1)}h cascaded delay
+                        </p>
+                      )}
+                    </div>
+                    <p className="text-[10px] font-mono text-green-400 font-bold">
+                      {new Date(departureDt.getTime() + (parseFloat(shipment.eta_hours) || 0) * 3_600_000)
+                        .toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Risk reason alert */}
             {shipment.risk?.current?.reason && (isCritical || isWarning) && (

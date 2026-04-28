@@ -67,15 +67,28 @@ function FitBounds({ shipments }) {
 const getMarkerIcon = (risk, isSelected, theme) => {
   const isHigh = risk === "high" || risk === "critical";
   const isMedium = risk === "medium";
-  const color = isHigh ? "#ff3b3b" : isMedium ? "#facc15" : "#22c55e";
-  const pulseClass = isHigh ? "marker-pulse-high" : isMedium ? "marker-pulse-medium" : "";
-  const glow = isSelected ? "0 0 12px rgba(59,130,246,0.9)" : "0 0 6px rgba(0,0,0,0.7)";
-  const borderColor = theme === 'dark' ? '#1e293b' : '#e2e8f0';
+  const hex = isHigh ? "#ef4444" : isMedium ? "#eab308" : "#22c55e";
+  const pingColor = isHigh ? "bg-red-500" : isMedium ? "bg-yellow-500" : "bg-green-500";
+  const glowColor = isHigh ? "rgba(239, 68, 68, 0.8)" : isMedium ? "rgba(234, 179, 8, 0.8)" : "rgba(34, 197, 94, 0.8)";
+  const finalGlow = isSelected ? "rgba(59, 130, 246, 0.9)" : glowColor;
+
   return new L.DivIcon({
-    className: "custom-marker",
-    html: `<div class="${pulseClass}" style="
-      background:${color};width:16px;height:16px;border-radius:50%;
-      border:2px solid ${borderColor};box-shadow:${glow};cursor:pointer;"></div>`
+    className: "custom-truck-marker",
+    iconSize: [32, 32],
+    iconAnchor: [16, 16],
+    html: `
+      <div class="relative w-full h-full flex items-center justify-center" style="cursor: pointer;">
+        <div class="absolute inset-0 rounded-full ${pingColor} opacity-40 animate-ping" style="animation-duration: 2s;"></div>
+        <div style="background:${hex};width:24px;height:24px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 12px ${finalGlow};display:flex;align-items:center;justify-content:center;z-index:10;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="1" y="3" width="15" height="13"></rect>
+            <polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon>
+            <circle cx="5.5" cy="18.5" r="2.5"></circle>
+            <circle cx="18.5" cy="18.5" r="2.5"></circle>
+          </svg>
+        </div>
+      </div>
+    `
   });
 };
 
@@ -113,6 +126,131 @@ const getViaIcon = (type) => {
       box-shadow:0 3px 8px rgba(0,0,0,0.3)">${iconEmoji}</div>`
   });
 };
+
+import polyline from '@mapbox/polyline';
+
+const AnimatedLiveTruck = memo(function AnimatedLiveTruck({ shipment, isSelected, theme, riskLevel, isHigh, isMed, etaDelay, delayClass, onClick }) {
+  const [liveLocation, setLiveLocation] = useState(null);
+  
+  useEffect(() => {
+    // If no geometry is available, fall back to default backend location snap
+    const defaultLoc = shipment.current_location && [shipment.current_location.lat, shipment.current_location.lng];
+    if (!shipment?.created_at || !shipment?.expected_travel_seconds || !shipment.route_geometry_encoded) {
+      setLiveLocation(defaultLoc || [0,0]);
+      return;
+    }
+
+    let positions;
+    try {
+      positions = polyline.decode(shipment.route_geometry_encoded); // [[lat, lng], ...]
+    } catch {
+      setLiveLocation(defaultLoc || [0,0]);
+      return;
+    }
+    
+    if (positions.length < 2) {
+      setLiveLocation(defaultLoc || [0,0]);
+      return;
+    }
+
+    // Euclidean Interpolator Engine
+    const getInterpolatedPoint = (positions, progressFrac) => {
+      if (progressFrac <= 0) return positions[0];
+      if (progressFrac >= 1) return positions[positions.length - 1];
+      let totalDist = 0;
+      const dists = [];
+      for (let i = 0; i < positions.length - 1; i++) {
+         const dx = positions[i+1][1] - positions[i][1];
+         const dy = positions[i+1][0] - positions[i][0];
+         const d = Math.sqrt(dx*dx + dy*dy);
+         dists.push(d);
+         totalDist += d;
+      }
+      const targetDist = totalDist * progressFrac;
+      let currDist = 0;
+      for (let i = 0; i < positions.length - 1; i++) {
+         if (currDist + dists[i] >= targetDist) {
+            const segmentFrac = dists[i] === 0 ? 0 : (targetDist - currDist) / dists[i];
+            const lat = positions[i][0] + (positions[i+1][0] - positions[i][0]) * segmentFrac;
+            const lng = positions[i][1] + (positions[i+1][1] - positions[i][1]) * segmentFrac;
+            return [lat, lng];
+         }
+         currDist += dists[i];
+      }
+      return positions[positions.length - 1];
+    };
+
+    const updatePosition = () => {
+      if (shipment.status === 'planned') {
+         setLiveLocation(getInterpolatedPoint(positions, 0));
+         return;
+      }
+      if (shipment.status === 'delivered') {
+         setLiveLocation(getInterpolatedPoint(positions, 1));
+         return;
+      }
+
+      // We rely on front-end mathematical geometry riding to perfectly stick to roads 60fps
+      const created = new Date(shipment.created_at).getTime();
+      const elapsedSec = (Date.now() - created) / 1000;
+      // 5x simulation!
+      const progress = Math.min((elapsedSec * 5) / shipment.expected_travel_seconds, 1);
+      setLiveLocation(getInterpolatedPoint(positions, progress));
+    };
+
+    updatePosition();
+    const interval = setInterval(updatePosition, 1000); // Ride highway polyline every 1s visually
+    return () => clearInterval(interval);
+  }, [shipment]);
+
+  if (!liveLocation) return null;
+  const opacity = isSelected === null ? 1 : isSelected ? 1 : 0.4;
+
+  return (
+    <Marker
+      position={liveLocation}
+      icon={getMarkerIcon(riskLevel, isSelected, theme)}
+      opacity={opacity}
+      eventHandlers={{ click: onClick }}
+      zIndexOffset={isSelected ? 1000 : 0}
+    >
+      <Tooltip direction="top" offset={[0, -10]} opacity={1}>
+        <div className="text-xs font-bold">
+          🚚 {shipment.tracking_number}
+          <br />
+          <span className="text-[10px] opacity-70">
+            {shipment.origin_name} → {shipment.destination_name}
+          </span>
+        </div>
+      </Tooltip>
+
+      <Popup className="custom-popup border-0">
+        <div className="flex flex-col gap-1 min-w-[160px]">
+          <strong className="text-theme-primary border-b border-theme pb-1 mb-1 text-sm">
+            {shipment.tracking_number}
+          </strong>
+          <span className="text-theme-secondary text-[11px] font-bold">
+            Route: {shipment.origin_name} → {shipment.destination_name}
+          </span>
+          <div className="flex justify-between mt-1 pt-1 border-t border-theme border-dashed">
+            <span className={`text-[9px] px-2 py-0.5 rounded text-white ${isHigh ? "bg-danger" : isMed ? "bg-warning" : "bg-success"}`}>
+              Risk: {riskLevel}
+            </span>
+            <span className={`text-[9px] px-1.5 py-0.5 rounded ${delayClass}`}>
+              ETA: {etaDelay}
+            </span>
+          </div>
+          {shipment.risk?.current?.reason &&
+            !shipment.risk.current.reason.toLowerCase().includes('unavailable') && (
+            <div className="bg-danger/10 mt-1 p-1 rounded border border-danger/20 text-danger text-[9px]">
+              ⚠️ {shipment.risk.current.reason}
+            </div>
+          )}
+        </div>
+      </Popup>
+    </Marker>
+  );
+});
 
 const Dashboard = memo(function Dashboard() {
   const { theme } = useTheme();
@@ -268,48 +406,18 @@ const Dashboard = memo(function Dashboard() {
                     );
                   })}
 
-                  {/* Shipment truck marker */}
-                  <Marker
-                    position={[loc.lat, loc.lng]}
-                    icon={getMarkerIcon(riskLevel, isSelected, theme)}
-                    opacity={opacity}
-                    eventHandlers={{ click: () => handleMarkerClick(shipment.id) }}
-                  >
-                    <Tooltip direction="top" offset={[0, -10]} opacity={1}>
-                      <div className="text-xs font-bold">
-                        🚚 {shipment.tracking_number}
-                        <br />
-                        <span className="text-[10px] opacity-70">
-                          {shipment.origin_name} → {shipment.destination_name}
-                        </span>
-                      </div>
-                    </Tooltip>
-
-                    <Popup className="custom-popup border-0">
-                      <div className="flex flex-col gap-1 min-w-[160px]">
-                        <strong className="text-theme-primary border-b border-theme pb-1 mb-1 text-sm">
-                          {shipment.tracking_number}
-                        </strong>
-                        <span className="text-theme-secondary text-[11px] font-bold">
-                          Route: {shipment.origin_name} → {shipment.destination_name}
-                        </span>
-                        <div className="flex justify-between mt-1 pt-1 border-t border-theme border-dashed">
-                          <span className={`text-[9px] px-2 py-0.5 rounded text-white ${isHigh ? "bg-danger" : isMed ? "bg-warning" : "bg-success"}`}>
-                            Risk: {riskLevel}
-                          </span>
-                          <span className={`text-[9px] px-1.5 py-0.5 rounded ${delayClass}`}>
-                            ETA: {etaDelay}
-                          </span>
-                        </div>
-                        {shipment.risk?.current?.reason &&
-                          !shipment.risk.current.reason.toLowerCase().includes('unavailable') && (
-                          <div className="bg-danger/10 mt-1 p-1 rounded border border-danger/20 text-danger text-[9px]">
-                            ⚠️ {shipment.risk.current.reason}
-                          </div>
-                        )}
-                      </div>
-                    </Popup>
-                  </Marker>
+                  {/* Live Interpolating Autonomous Truck Marker */}
+                  <AnimatedLiveTruck
+                     shipment={shipment}
+                     isSelected={isSelected}
+                     theme={theme}
+                     riskLevel={riskLevel}
+                     isHigh={isHigh}
+                     isMed={isMed}
+                     etaDelay={etaDelay}
+                     delayClass={delayClass}
+                     onClick={() => handleMarkerClick(shipment.id)}
+                  />
 
                   {/* Incident markers — only for selected shipment */}
                   {isSelected && (shipment.route_incidents?.length > 0 ? shipment.route_incidents : (incidentOverride[shipment.id] || []))

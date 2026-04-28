@@ -1,6 +1,7 @@
 import { memo, useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertTriangle, X, WifiOff, MapPin, Info } from 'lucide-react';
+import GeminiLogo from './GeminiLogo';
 import { useAlertStore } from '../../stores/alertStore';
 import { useUIStore } from '../../stores/uiStore';
 import { useQueryClient } from '@tanstack/react-query';
@@ -95,38 +96,59 @@ const LiveAlertItem = memo(function LiveAlertItem({ alert, onDismiss }) {
     className="relative group bg-slate-900/80 backdrop-blur-xl border border-slate-700 rounded-xl p-3 w-[300px] shadow-xl hover:border-slate-500 transition-all cursor-pointer"
   >
     {/* HEADER */}
-    <div className="flex items-center justify-between mb-2">
-      <span className={`text-[10px] font-semibold uppercase ${
-        alert.badge === "REAL" ? "text-red-400" : "text-blue-400"
-      }`}>
-        {alert.badge === "REAL" ? "REAL SYSTEM" : "SCENARIO LAB"}
-      </span>
+    {(() => {
+      const isGemini = alert.primary_driver === 'historical';
+      const bypassMatch = isGemini && alert.message?.match(/bypass via ([^.–—]+)/i);
+      const bypassCity  = bypassMatch ? bypassMatch[1].trim() : null;
 
-      <button
-        onClick={(e) => { e.stopPropagation(); onDismiss(alert.id); }}
-        className="text-gray-500 hover:text-white text-xs"
-      >
-        ✕
-      </button>
-    </div>
+      return (
+        <>
+          <div className="flex items-center justify-between mb-2">
+            <span className={`flex items-center gap-1 text-[10px] font-semibold uppercase ${
+              isGemini ? 'text-violet-400' : alert.badge === 'REAL' ? 'text-red-400' : 'text-blue-400'
+            }`}>
+              {isGemini ? <><GeminiLogo size={13} /> AI ROAD INTEL</> : alert.badge === 'REAL' ? 'REAL SYSTEM' : 'SCENARIO LAB'}
+            </span>
+            <button
+              onClick={(e) => { e.stopPropagation(); onDismiss(alert.id); }}
+              className="text-gray-500 hover:text-white text-xs"
+            >
+              ✕
+            </button>
+          </div>
 
-    {/* MAIN CONTENT */}
-    <div className="flex items-center gap-2 text-xs text-gray-300">
-      <span className="text-yellow-400">⚠️</span>
-      <span className="truncate">
-        {alert.message || 'Alert detected'}
-      </span>
-    </div>
+          {/* MAIN CONTENT */}
+          <div className="flex items-start gap-2 text-xs text-gray-300">
+            <span className="mt-0.5 shrink-0">
+              {isGemini ? <GeminiLogo size={14} /> : <span className="text-yellow-400">⚠️</span>}
+            </span>
+            <span className="line-clamp-2 leading-relaxed">
+              {alert.message || 'Alert detected'}
+            </span>
+          </div>
 
-    {/* STATUS */}
-    <div className="text-[10px] text-green-400 font-semibold mt-2">
-      ● STATUS UPDATE
-    </div>
+          {/* GEMINI BYPASS CHIP */}
+          {bypassCity && (
+            <div className="mt-2 flex items-center gap-1.5">
+              <span className="text-[9px] text-violet-400 font-black uppercase tracking-wider">Bypass:</span>
+              <span className="px-2 py-0.5 rounded-full bg-violet-500/15 border border-violet-500/30 text-violet-300 text-[10px] font-bold">
+                {bypassCity}
+              </span>
+            </div>
+          )}
 
-    {/* FOOTER */}
-    <div className="text-[10px] text-gray-500 mt-1">
-      {alert.shipment_id?.slice(-6)}
-    </div>
+          {/* STATUS */}
+          <div className={`text-[10px] font-semibold mt-2 ${isGemini ? 'text-violet-400' : 'text-green-400'}`}>
+            ● {isGemini ? 'GEMINI INTELLIGENCE' : 'STATUS UPDATE'}
+          </div>
+
+          {/* FOOTER */}
+          <div className="text-[10px] text-gray-500 mt-1">
+            {alert.shipment_id?.slice(-6)}
+          </div>
+        </>
+      );
+    })()}
 
   </motion.div>
 );

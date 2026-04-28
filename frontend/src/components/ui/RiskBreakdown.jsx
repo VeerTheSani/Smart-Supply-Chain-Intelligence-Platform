@@ -2,13 +2,14 @@ import { memo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, ChevronUp, ShieldAlert, Activity, Zap } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import GeminiLogo from './GeminiLogo';
 
 const FACTOR_META = {
   weather:     { label: 'Weather',       icon: '🌦️', color: 'from-blue-500 to-cyan-400',   barColor: 'bg-blue-500' },
   traffic:     { label: 'Traffic',       icon: '🚗', color: 'from-orange-500 to-amber-400', barColor: 'bg-orange-500' },
   events:      { label: 'Events',        icon: '⚡', color: 'from-purple-500 to-violet-400', barColor: 'bg-purple-500' },
   time_buffer: { label: 'Time Buffer',   icon: '⏱️', color: 'from-teal-500 to-emerald-400', barColor: 'bg-teal-500' },
-  historical:  { label: 'Historical',    icon: '📊', color: 'from-slate-500 to-gray-400',   barColor: 'bg-slate-500' },
+  historical:  { label: 'Gemini AI Intel', icon: null,  color: 'from-violet-500 to-purple-400', barColor: 'bg-violet-500' },
 };
 
 const RISK_BADGE = {
@@ -110,7 +111,11 @@ const RiskBreakdown = memo(function RiskBreakdown({ riskAssessment }) {
                   >
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
-                        <span className="text-base">{factor.meta.icon}</span>
+                        <span className="text-base flex items-center">
+                          {factor.key === 'historical'
+                            ? <GeminiLogo size={18} />
+                            : factor.meta.icon}
+                        </span>
                         <span className="text-[11px] font-black text-theme-primary uppercase tracking-[0.15em]">
                           {factor.meta.label}
                         </span>
@@ -121,29 +126,82 @@ const RiskBreakdown = memo(function RiskBreakdown({ riskAssessment }) {
                         )}
                       </div>
                       <div className="text-right">
-                        <span className="text-xs font-mono text-theme-secondary">
-                          {factor.score} × {factor.weight} = 
-                        </span>
-                        <span className="text-xs font-mono font-bold text-theme-primary ml-1">
-                          {factor.contribution.toFixed(1)}
-                        </span>
+                        {factor.reason === 'AI Intel is currently analyzing...' ? (
+                          <span className="text-xs font-mono font-bold text-violet-400/60 animate-pulse">
+                            COMPUTING...
+                          </span>
+                        ) : (
+                          <>
+                            <span className="text-xs font-mono text-theme-secondary">
+                              {factor.score} × {factor.weight} = 
+                            </span>
+                            <span className="text-xs font-mono font-bold text-theme-primary ml-1">
+                              {factor.contribution.toFixed(1)}
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
 
                     {/* Progress bar */}
                     <div className="h-1.5 w-full bg-theme-tertiary rounded-full overflow-hidden">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${barWidth}%` }}
-                        transition={{ duration: 0.5, delay: i * 0.05, ease: 'easeOut' }}
-                        className={cn('h-full rounded-full', factor.meta.barColor)}
-                      />
+                      {factor.reason === 'AI Intel is currently analyzing...' ? (
+                         <div className="h-full w-full bg-violet-500/20 overflow-hidden relative">
+                           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-violet-500/40 to-transparent -translate-x-full animate-[shimmer_1.5s_infinite]" />
+                         </div>
+                      ) : (
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: `${barWidth}%` }}
+                          transition={{ duration: 0.5, delay: i * 0.05, ease: 'easeOut' }}
+                          className={cn('h-full rounded-full', factor.meta.barColor)}
+                        />
+                      )}
                     </div>
 
                     {/* Reason */}
-                    <p className="text-[11px] text-theme-secondary mt-1.5 leading-relaxed">
-                      {factor.reason || 'No data'}
-                    </p>
+                    {factor.reason === 'AI Intel is currently analyzing...' ? (
+                      <div className="flex items-center gap-2 mt-2">
+                        <div className="w-3.5 h-3.5 border-2 border-violet-500/30 border-t-violet-500 rounded-full animate-spin shrink-0" />
+                        <p className="text-[11px] text-violet-400/80 animate-pulse font-medium">{factor.reason}</p>
+                      </div>
+                    ) : factor.reason === 'unavailable' || (typeof factor.reason === 'string' && factor.reason.includes('API error')) ? (
+                      <div className="mt-2.5 p-3 rounded-xl bg-red-500/10 border border-red-500/20 flex gap-2.5 animate-in fade-in slide-in-from-top-1">
+                        <ShieldAlert className="w-4 h-4 text-red-500 shrink-0 mt-0.5 animate-pulse" />
+                        <div>
+                          <p className="text-[10px] font-black text-red-500 uppercase tracking-widest leading-none mb-1.5">API Quota Exhausted</p>
+                          <p className="text-[10px] text-theme-secondary leading-tight">Advanced AI Intel is unavailable due to strict Google Cloud quotas. Fallback data active. It will naturally unlock upon reset.</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-theme-secondary mt-1.5 leading-relaxed">
+                        {factor.reason || 'No data'}
+                      </p>
+                    )}
+
+                    {/* Gemini Bypass Panel (Historical / AI Intel only) */}
+                    {factor.key === 'historical' && factor.safe_waypoint && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        transition={{ duration: 0.3, delay: 0.1 }}
+                        className="mt-2 pt-2 border-t border-violet-500/20 border-dashed overflow-hidden"
+                      >
+                        <p className="text-[9px] font-black text-violet-400 uppercase tracking-[0.15em] mb-1.5 flex items-center gap-1">
+                          🛣️ Gemini Bypass Recommended
+                        </p>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="px-2 py-0.5 rounded-full bg-violet-500/15 border border-violet-500/30 text-violet-300 text-[10px] font-black">
+                            Via {factor.safe_waypoint}
+                          </span>
+                          {factor.incident_location && (
+                            <span className="text-[10px] text-theme-secondary">
+                              · incident near <span className="text-theme-primary font-semibold">{factor.incident_location}</span>
+                            </span>
+                          )}
+                        </div>
+                      </motion.div>
+                    )}
 
                     {/* Point Results Visualizer (Weather Only) */}
                     {factor.key === 'weather' && factor.point_results && factor.point_results.length > 0 && (

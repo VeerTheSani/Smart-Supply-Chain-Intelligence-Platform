@@ -42,6 +42,9 @@ function validateMessage(msg) {
     'reroute_executed',
     'decision_triggered',
     'scenario_update',
+    'gps_stuck',
+    'api_failure',
+    'cascade_alert',
   ];
 
   if (!validTypes.includes(msg.type)) {
@@ -148,6 +151,53 @@ function handleRealAlert(msg, callbacks) {
       }
       callbacks.queryClient.invalidateQueries({ queryKey: ['shipments'] });
       break;
+
+    case 'gps_stuck':
+      toast(
+        msg.message || `GPS stuck: ${msg.shipment_name || msg.shipment_id?.slice(-6)} — monitor manually`,
+        {
+          icon: '📍',
+          duration: 7000,
+          id: `gps-stuck-${msg.shipment_id}`,
+          style: { background: '#7c3aed', color: '#fff' },
+        }
+      );
+      callbacks.addRealAlert({
+        id: `gps-${msg.timestamp}-${msg.shipment_id}`,
+        ...msg,
+      });
+      break;
+
+    case 'api_failure':
+      toast.error(
+        `${msg.message} (${msg.service_name})`,
+        { id: `api-fail-${msg.service_name}-${msg.shipment_id}`, duration: 7000 }
+      );
+      callbacks.addRealAlert({
+        id: `apifail-${msg.timestamp}-${msg.shipment_id || msg.service_name}`,
+        ...msg,
+      });
+      break;
+
+    case 'cascade_alert': {
+      const h = Math.floor((msg.delay_minutes || 0) / 60);
+      const m = (msg.delay_minutes || 0) % 60;
+      const delayStr = h > 0 ? `${h}h ${m}m` : `${m}m`;
+      toast(
+        `Cascade: ${msg.shipment_name} delayed ${delayStr} — upstream ${msg.upstream_name} is behind.`,
+        {
+          icon: '🔗',
+          duration: 7000,
+          id: `cascade-${msg.shipment_id}`,
+          style: { background: '#b45309', color: '#fff' },
+        }
+      );
+      callbacks.addRealAlert({
+        id: `cascade-${msg.timestamp}-${msg.shipment_id}`,
+        ...msg,
+      });
+      break;
+    }
 
     default:
       console.warn(`[WS] Unhandled real alert type: ${type}`);

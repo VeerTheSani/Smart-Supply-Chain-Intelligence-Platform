@@ -1,6 +1,6 @@
 import { memo, useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Network, ChevronDown, ChevronUp, AlertTriangle, Clock, Package } from 'lucide-react';
+import { Network, ChevronDown, ChevronUp, AlertTriangle, Clock, Package, ArrowUp } from 'lucide-react';
 import apiClient from '../../api/apiClient';
 import { cn } from '../../lib/utils';
 
@@ -46,7 +46,9 @@ const CascadePanel = memo(function CascadePanel({ shipmentId }) {
 
   if (!shipmentId) return null;
 
-  const hasDependencies = data?.dependent_shipments?.length > 0;
+  const hasUpstream     = !!data?.upstream;
+  const hasDownstream   = (data?.dependent_shipments?.length ?? 0) > 0;
+  const hasRelationship = hasUpstream || hasDownstream;
 
   return (
     <div className="bg-theme-secondary rounded-2xl border border-theme overflow-hidden">
@@ -86,84 +88,107 @@ const CascadePanel = memo(function CascadePanel({ shipmentId }) {
                 </div>
               ) : error ? (
                 <div className="py-4 text-center text-sm text-danger">{error}</div>
-              ) : !hasDependencies ? (
+              ) : !hasRelationship ? (
                 <div className="py-6 text-center">
                   <Package className="w-8 h-8 text-theme-secondary opacity-30 mx-auto mb-2" />
-                  <p className="text-sm text-theme-secondary">No downstream dependencies found</p>
+                  <p className="text-sm text-theme-secondary">No dependencies found</p>
                   <p className="text-xs text-theme-secondary opacity-60 mt-1">This shipment operates independently</p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {/* Impact summary */}
-                  <div className="glass-panel border-accent/30 rounded-2xl p-4 flex items-start gap-4 bg-accent/5">
-                    <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center border border-accent/20">
-                      <AlertTriangle className="w-5 h-5 text-accent animate-pulse" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-xs text-theme-primary leading-relaxed font-bold">
-                        Network impacts <span className="text-accent">{data.dependent_shipments.length} Nodes</span> with{' '}
-                        <span className="text-accent">{data.total_delay_exposure_hours}h Exposure</span>
-                      </p>
-                      <p className="text-[10px] text-theme-secondary mt-1 uppercase tracking-wider opacity-60 font-bold">Inferred systemic delay probability: High</p>
-                    </div>
-                  </div>
-
-                  {/* Dependency list */}
-                  {data.dependent_shipments.map((dep, i) => {
-                    const statusStyle = STATUS_STYLE[dep.status] || STATUS_STYLE.planned;
-
-                    return (
-                      <motion.div
-                        key={dep.id}
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: i * 0.06 }}
-                        className="glass-panel rounded-2xl p-4 border-theme flex items-center justify-between gap-4 bg-theme-tertiary/10 hover:border-accent/30 transition-all cursor-pointer group"
-                      >
-                        <div className="flex items-center gap-3 flex-1 min-w-0">
-                          {/* Depth indicator */}
-                          <div className="flex shrink-0">
-                            {Array.from({ length: dep.depth || 1 }).map((_, d) => (
-                              <div key={d} className="w-1.5 h-6 bg-accent/20 rounded-full mr-0.5" />
-                            ))}
-                          </div>
-
-                          <div className="min-w-0 flex-1">
-                            <p className="text-xs font-bold text-theme-primary truncate">
-                              {dep.shipment_name}
-                            </p>
-                            <p className="text-[10px] text-theme-secondary font-mono mt-0.5">
-                              ID: {dep.id.slice(-8)}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 shrink-0">
-                          {/* Delay exposure */}
-                          <div className="flex items-center gap-1 text-warning bg-warning/10 px-2 py-1 rounded-lg border border-warning/20">
-                            <Clock className="w-3 h-3" />
-                            <span className="text-[10px] font-bold">{dep.delay_exposure_hours}h</span>
-                          </div>
-
-                          {/* Status badge */}
+                  {/* Upstream: what this shipment is waiting on */}
+                  {hasUpstream && (
+                    <div className="bg-blue-500/5 border border-blue-500/20 rounded-2xl p-4 flex items-start gap-3">
+                      <div className="p-2 bg-blue-500/10 rounded-xl shrink-0">
+                        <ArrowUp className="w-4 h-4 text-blue-400" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[10px] text-blue-400 uppercase tracking-wider font-bold mb-1">Waiting on</p>
+                        <p className="text-xs font-bold text-theme-primary truncate">{data.upstream.shipment_name}</p>
+                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                           <span className={cn(
-                            'px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border',
-                            statusStyle
+                            'px-2 py-0.5 rounded-md text-[10px] font-bold uppercase border',
+                            STATUS_STYLE[data.upstream.status] || STATUS_STYLE.planned
                           )}>
-                            {dep.status}
+                            {data.upstream.status}
                           </span>
+                          {data.upstream.is_delayed && (
+                            <span className="text-[10px] text-red-400 font-bold">
+                              +{(data.upstream.delay_minutes / 60).toFixed(1)}h delay
+                            </span>
+                          )}
+                          {data.upstream.eta_hours != null && (
+                            <span className="text-[10px] text-theme-secondary font-mono">
+                              ETA {data.upstream.eta_hours}h
+                            </span>
+                          )}
                         </div>
-                      </motion.div>
-                    );
-                  })}
+                      </div>
+                    </div>
+                  )}
 
-                  {/* Total bar */}
-                  <div className="pt-2 border-t border-theme flex items-center justify-between">
-                    <span className="text-xs font-bold text-theme-secondary uppercase tracking-wider">Total Delay Exposure</span>
-                    <span className="text-lg font-black text-warning font-mono">
-                      {data.total_delay_exposure_hours}h
-                    </span>
-                  </div>
+                  {/* Downstream: shipments waiting on this one */}
+                  {hasDownstream && (
+                    <>
+                      {/* Impact summary */}
+                      <div className="glass-panel border-accent/30 rounded-2xl p-4 flex items-start gap-4 bg-accent/5">
+                        <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center border border-accent/20">
+                          <AlertTriangle className="w-5 h-5 text-accent animate-pulse" />
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-xs text-theme-primary leading-relaxed font-bold">
+                            Network impacts <span className="text-accent">{data.dependent_shipments.length} Nodes</span> with{' '}
+                            <span className="text-accent">{data.total_delay_exposure_hours}h Exposure</span>
+                          </p>
+                          <p className="text-[10px] text-theme-secondary mt-1 uppercase tracking-wider opacity-60 font-bold">Inferred systemic delay probability: High</p>
+                        </div>
+                      </div>
+
+                      {/* Dependency list */}
+                      {data.dependent_shipments.map((dep, i) => {
+                        const statusStyle = STATUS_STYLE[dep.status] || STATUS_STYLE.planned;
+                        return (
+                          <motion.div
+                            key={dep.id}
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: i * 0.06 }}
+                            className="glass-panel rounded-2xl p-4 border-theme flex items-center justify-between gap-4 bg-theme-tertiary/10 hover:border-accent/30 transition-all cursor-pointer group"
+                          >
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                              <div className="flex shrink-0">
+                                {Array.from({ length: dep.depth || 1 }).map((_, d) => (
+                                  <div key={d} className="w-1.5 h-6 bg-accent/20 rounded-full mr-0.5" />
+                                ))}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-bold text-theme-primary truncate">{dep.shipment_name}</p>
+                                <p className="text-[10px] text-theme-secondary font-mono mt-0.5">ID: {dep.id.slice(-8)}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <div className="flex items-center gap-1 text-warning bg-warning/10 px-2 py-1 rounded-lg border border-warning/20">
+                                <Clock className="w-3 h-3" />
+                                <span className="text-[10px] font-bold">{dep.delay_exposure_hours}h</span>
+                              </div>
+                              <span className={cn(
+                                'px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border',
+                                statusStyle
+                              )}>
+                                {dep.status}
+                              </span>
+                            </div>
+                          </motion.div>
+                        );
+                      })}
+
+                      {/* Total bar */}
+                      <div className="pt-2 border-t border-theme flex items-center justify-between">
+                        <span className="text-xs font-bold text-theme-secondary uppercase tracking-wider">Total Delay Exposure</span>
+                        <span className="text-lg font-black text-warning font-mono">{data.total_delay_exposure_hours}h</span>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>

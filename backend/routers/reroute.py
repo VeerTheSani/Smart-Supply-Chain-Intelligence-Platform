@@ -173,3 +173,47 @@ async def score_reroute(id: str, body: ScoreRequest):
 
     logger.info(f"Risk scored for {id} — {len(scored)} alternatives")
     return {"scored_alternatives": scored}
+
+
+class ApplyRerouteRequest(BaseModel):
+    geometry_encoded: str
+    distance_km: float
+    duration_seconds: int
+    waypoints: list[dict[str, Any]]
+
+
+@router.post("/{id}/apply")
+async def apply_reroute(id: str, body: ApplyRerouteRequest):
+    """
+    Applies the selected alternative route to the live shipment document.
+    Permanently replaces the active polyline and trajectory data.
+    """
+    shipment_id = _to_id(id)
+    if not await db.shipments.find_one({"_id": shipment_id}):
+        raise HTTPException(status_code=404, detail="Shipment not found")
+
+    from datetime import datetime, timezone
+    
+    updates = {
+        "route_geometry_encoded": body.geometry_encoded,
+        "route_waypoints": body.waypoints,
+        "distance_km": body.distance_km,
+        "expected_travel_seconds": body.duration_seconds,
+        "eta_hours": round(body.duration_seconds / 3600, 2),
+        "status": "rerouting",
+        "updated_at": datetime.now(timezone.utc),
+    }
+
+    try:
+        await db.shipments.update_one({"_id": shipment_id}, {"$set": updates})
+        logger.info(f"Successfully applied alternative route to shipment {id}")
+        
+        # Optionally re-trigger an incident background fetch here so the new route gets monitored immediately
+        from routers.incidents import fetch_and_store_incidents
+        import asyncio
+        asyncio.create_task(fetch_and_store_incidents(shipment_id))
+        
+        return {"status": "success", "message": "Route applied successfully"}
+    except Exception as e:
+        logger.error(f"Failed to apply reroute for {id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to apply reroute: {e}")

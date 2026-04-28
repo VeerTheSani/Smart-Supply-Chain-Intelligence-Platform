@@ -7,6 +7,7 @@
 import httpx
 import os
 import json
+import re
 import logging
 from dotenv import load_dotenv
 load_dotenv()
@@ -76,7 +77,7 @@ If no disruptions found, return severity_score 0 and empty events_found array.""
             }
         ],
         "tools": [
-            {"google_search": {}}   # enables web grounding
+            {"googleSearch": {}}   # enables web grounding
         ],
         "generationConfig": {
             "temperature": 0.1,     # low temp for factual accuracy
@@ -85,7 +86,7 @@ If no disruptions found, return severity_score 0 and empty events_found array.""
     }
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 GEMINI_URL,
                 params={"key": GEMINI_API_KEY},
@@ -94,25 +95,21 @@ If no disruptions found, return severity_score 0 and empty events_found array.""
             resp.raise_for_status()
             data = resp.json()
 
-        # Extract text from response
-        text = (
-            data.get("candidates", [{}])[0]
-                .get("content", {})
-                .get("parts", [{}])[0]
-                .get("text", "")
-        )
+        # Extract all text parts since Search Grounding may return prose or citations alongside the JSON
+        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+        combined_text = "".join([p.get("text", "") for p in parts if p.get("text")])
 
-        if not text:
+        if not combined_text:
             logger.warning("Gemini returned empty response")
             return _default_response("Empty response from Gemini")
 
-        # Clean up response — remove markdown fences if present
-        text = text.strip()
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-        text = text.strip()
+        # Extract JSON using Regex in case it is wrapped in prose
+        import re
+        json_match = re.search(r'\{.*\}', combined_text, re.DOTALL)
+        if json_match:
+            text = json_match.group(0)
+        else:
+            text = combined_text
 
         # Fix newlines inside JSON string values — Gemini sometimes does this
         import re
@@ -145,7 +142,6 @@ If no disruptions found, return severity_score 0 and empty events_found array.""
         logger.error(f"Gemini unexpected error: {e}")
         return _default_response(str(e))
 
-
 def _default_response(reason: str) -> dict:
     """Safe fallback when Gemini fails — neutral score, don't crash risk engine."""
     return {
@@ -154,6 +150,134 @@ def _default_response(reason: str) -> dict:
         "primary_concern": f"Event analysis unavailable: {reason}",
         "confidence":     "LOW",
     }
+
+
+# ── Road disturbance score (historical factor) ─────────────────────────────────
+
+async def get_road_disturbance_score(
+    road_names: list[str],
+    planned_date: str,
+    risk_level: str = "low",
+    origin: str = "",
+    destination: str = "",
+    via_points: list[str] = [],
+) -> dict:
+    """
+    Search for disturbances on specific highway numbers near a planned date.
+    Returns {"score", "reason", "incident_location", "safe_waypoint"}
+    safe_waypoint is a bypass city name only when score >= 40, else empty string.
+    Falls back to {"score": 0, "reason": "unavailable", ...} on any error.
+    """
+    if not GEMINI_API_KEY:
+        logger.error("GEMINI_API_KEY not set in .env")
+        return _disturbance_fallback("unavailable")
+
+    if not road_names:
+        return _disturbance_fallback("No road names available")
+
+    from services.cache import road_disturbance_cache
+    import re as _re
+
+    ttl       = 600 if risk_level in ("high", "critical") else 1800
+    route_key = f"{origin}>{destination}"
+    cache_key = f"road_dist:{'|'.join(sorted(road_names))}:{planned_date}:{route_key}"
+
+    cached = road_disturbance_cache.get(cache_key)
+    if cached is not None:
+        logger.debug(f"Road disturbance cache hit for {cache_key}")
+        return cached
+
+    roads_str = ", ".join(road_names)
+    stops_str = " → ".join(via_points) if via_points else ""
+    route_display = f"{origin} → {stops_str} → {destination}" if stops_str else f"{origin} → {destination}"
+
+    prompt = f"""You are a road intelligence analyst for Indian logistics.
+
+Route: {route_display}
+Highways: {roads_str}
+Travel date: {planned_date}
+
+Search for disturbances on these specific highways:
+- Road closures or construction blocks on these highway numbers
+- Flooding or landslides affecting these corridors
+- Protests, bandh, or strikes specifically on these roads
+- Major accident-based closures reported in news
+
+Respond ONLY with this exact JSON, nothing else:
+{{
+  "score": <0-100, 0=no issues, 20=minor works, 40=moderate disruption, 60=significant, 80=major blockage>,
+  "reason": "<one concise sentence, or 'No road disturbances found' if clear>",
+  "incident_location": "<city or highway stretch where the problem is, empty string if none>",
+  "safe_waypoint": "<nearest real Indian city on a parallel corridor between {origin} and {destination} that avoids the incident, empty string if score < 40>"
+}}
+
+If score < 40, safe_waypoint and incident_location must be empty strings."""
+
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "tools": [{"googleSearch": {}}],
+        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 8192},
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                GEMINI_URL,
+                params={"key": GEMINI_API_KEY},
+                json=payload,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+        combined_text = "".join([p.get("text", "") for p in parts if p.get("text")])
+
+        if not combined_text:
+            logger.warning("Gemini road disturbance: empty response")
+            return _mock_disturbance_fallback("unavailable")
+
+        import re
+        json_match = re.search(r'\{.*\}', combined_text, re.DOTALL)
+        if json_match:
+            text = json_match.group(0)
+        else:
+            text = combined_text
+        text = re.sub(r':\s*"([^"]*)\n([^"]*)"', lambda m: ': "' + m.group(1).strip() + ' ' + m.group(2).strip() + '"', text)
+
+        result = json.loads(text)
+        result.setdefault("score", 0)
+        result.setdefault("reason", "No road disturbances found")
+        result.setdefault("incident_location", "")
+        result.setdefault("safe_waypoint", "")
+        result["score"] = float(max(0, min(100, result["score"])))
+
+        # Guard: clear bypass fields if score is low (prevents hallucinated waypoints)
+        if result["score"] < 40:
+            result["safe_waypoint"]     = ""
+            result["incident_location"] = ""
+
+        logger.info(
+            f"Road disturbance: score={result['score']} | {result['reason'][:60]}"
+            + (f" | bypass via {result['safe_waypoint']}" if result["safe_waypoint"] else "")
+        )
+        road_disturbance_cache.set(cache_key, result, ttl=ttl)
+        return result
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Road disturbance JSON parse error: {e} | text: {text[:200]}")
+        return _disturbance_fallback("unavailable")
+    except httpx.TimeoutException:
+        logger.error("Road disturbance Gemini request timed out")
+        return _disturbance_fallback("unavailable")
+    except httpx.HTTPError as e:
+        logger.error(f"Road disturbance Gemini HTTP error: {e}")
+        return _disturbance_fallback("unavailable")
+    except Exception as e:
+        logger.error(f"Road disturbance unexpected error: {e}")
+        return _disturbance_fallback("unavailable")
+
+def _disturbance_fallback(reason: str) -> dict:
+    return {"score": 0, "reason": reason, "incident_location": "", "safe_waypoint": ""}
 
 
 # ── Self test ──────────────────────────────────────────────────────────────────
@@ -184,3 +308,16 @@ if __name__ == "__main__":
             print(f"  Impact   : {event.get('impact')}")
 
     asyncio.run(test())
+
+    async def test_road_disturbance():
+        from datetime import date
+        print("\n\nTesting road disturbance score...")
+        result = await get_road_disturbance_score(
+            road_names=["NH48", "NH8"],
+            planned_date=date.today().isoformat(),
+            risk_level="low",
+        )
+        print(f"Score  : {result['score']}/100")
+        print(f"Reason : {result['reason']}")
+
+    asyncio.run(test_road_disturbance())

@@ -2,12 +2,12 @@
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 
 from database import db
 from models import ShipmentCreate, ShipmentUpdate
@@ -38,6 +38,13 @@ def _serialize(doc: dict) -> dict:
     doc.setdefault("origin",      doc.get("origin_name", ""))
     doc.setdefault("destination", doc.get("destination_name", ""))
     doc.setdefault("tracking_number", doc.get("shipment_name", doc.get("id", "")[:8].upper()))
+
+    # CRITICAL TIMEZONE FIX: MongoDB strips tzinfo. Force UTC so Javascript doesn't interpret it as local Indian Standard Time (+05:30 offset drift)
+    for field in ["created_at", "updated_at"]:
+        if field in doc and isinstance(doc[field], datetime):
+            if doc[field].tzinfo is None:
+                doc[field] = doc[field].replace(tzinfo=timezone.utc)
+            doc[field] = doc[field].isoformat()
 
     # Her frontend expects: conditions.weather, conditions.traffic
     doc.setdefault("conditions", {"weather": "clear", "traffic": "low"})
@@ -90,25 +97,58 @@ async def _get_or_404(id: str) -> dict:
 
 
 async def _initial_risk_assessment(shipment_id, doc: dict):
-    """Run risk calculation immediately after creation and persist to MongoDB."""
+    """Run risk calculation immediately after creation and persist to MongoDB in two stages to prevent UI hangs."""
     try:
         from routers.risk_engine import calculate_risk
-        assessment = await calculate_risk(doc)
-        assessment_to_store = {**assessment, "computed_at": assessment["computed_at"].isoformat()}
+        
+        # STAGE 1: Fast assessment (Weather, Traffic, Time Buffer)
+        doc["_skip_gemini"] = True
+        fast_assessment = await calculate_risk(doc)
+        
+        # Inject our loading reason explicitly into the cached frontend risk
+        if "historical" in fast_assessment.get("breakdown", {}):
+            fast_assessment["breakdown"]["historical"]["reason"] = "AI Intel is currently analyzing..."
+            
+        fast_to_store = {**fast_assessment, "computed_at": fast_assessment["computed_at"].isoformat()}
+        
         await db.shipments.update_one(
             {"_id": shipment_id},
-            {"$set": {"last_risk_assessment": assessment_to_store, "updated_at": datetime.now(timezone.utc)},
-             "$push": {"risk_history": assessment_to_store}},
+            {"$set": {"last_risk_assessment": fast_to_store, "updated_at": datetime.now(timezone.utc)}}
         )
-        logger.info(f"Initial risk assessment stored for {shipment_id}: {assessment['risk_level']} ({assessment['final_score']})")
+        logger.info(f"Stage 1 initial assessment stored for {shipment_id}: {fast_assessment['risk_level']}")
+        
+        # STAGE 2: Deep assessment (Gemini AI Intel takes ~10-15 seconds)
+        doc["_skip_gemini"] = False
+        final_assessment = await calculate_risk(doc)
+        
+        final_to_store = {**final_assessment, "computed_at": final_assessment["computed_at"].isoformat()}
+        
+        await db.shipments.update_one(
+            {"_id": shipment_id},
+            {"$set": {"last_risk_assessment": final_to_store, "updated_at": datetime.now(timezone.utc)},
+             "$push": {"risk_history": final_to_store}},
+        )
+        logger.info(f"Stage 2 (Final) risk assessment stored for {shipment_id}: {final_assessment['risk_level']} ({final_assessment['final_score']})")
+        
     except Exception as e:
         logger.error(f"Initial risk assessment failed for {shipment_id}: {e}")
+
+async def _background_assessment_task(shipment_id_str: str):
+    from routers.incidents import fetch_and_store_incidents
+    try:
+        await fetch_and_store_incidents(shipment_id_str)
+        doc = await db.shipments.find_one({"_id": _to_id(shipment_id_str)})
+        if doc:
+            await _initial_risk_assessment(_to_id(shipment_id_str), doc)
+    except Exception as e:
+        logger.error(f"Background assessment failed for {shipment_id_str}: {e}")
+
 
 
 # ── POST /api/shipments ────────────────────────────────────────────────────────
 
 @router.post("", status_code=201)
-async def create_shipment(data: ShipmentCreate):
+async def create_shipment(data: ShipmentCreate, background_tasks: BackgroundTasks):
     """
     Create a new shipment:
     1. Geocode origin + destination (Nominatim)
@@ -163,6 +203,23 @@ async def create_shipment(data: ShipmentCreate):
     # Generate tracking number
     tracking_number = f"SC-{str(uuid.uuid4())[:8].upper()}"
 
+    # Resolve upstream metadata for dependent shipments
+    upstream_tracking_number = None
+    upstream_shipment_name   = None
+    scheduled_departure      = None
+    if data.upstream_shipment_id:
+        try:
+            up = await db.shipments.find_one(
+                {"_id": ObjectId(data.upstream_shipment_id)},
+                {"original_eta": 1, "tracking_number": 1, "shipment_name": 1}
+            )
+            if up:
+                upstream_tracking_number = up.get("tracking_number")
+                upstream_shipment_name   = up.get("shipment_name")
+                scheduled_departure      = up.get("original_eta")  # when upstream is expected to arrive
+        except Exception as e:
+            logger.warning(f"Could not fetch upstream shipment {data.upstream_shipment_id}: {e}")
+
     doc = {
         # Core fields (your schema)
         "shipment_name":         data.shipment_name,
@@ -209,20 +266,39 @@ async def create_shipment(data: ShipmentCreate):
         "risk_history":         [],
         "alerts_triggered":     [],
 
+        # Cascade dependency
+        "upstream_shipment_id":     data.upstream_shipment_id,
+        "upstream_tracking_number": upstream_tracking_number,
+        "upstream_shipment_name":   upstream_shipment_name,
+        "depends_on_delivery":      data.depends_on_delivery,
+        "scheduled_departure":      scheduled_departure,
+        "original_eta":             now + timedelta(seconds=expected_travel_secs),
+        "delay_minutes":            0,
+        "is_delayed":               False,
+        "cascade_notified":         True,
+
         # Timestamps
         "created_at": now,
         "updated_at": now,
     }
 
     result = await db.shipments.insert_one(doc)
-    doc["_id"] = result.inserted_id
 
-    # Kick off incident fetch + initial risk assessment in background
-    from routers.incidents import fetch_and_store_incidents
-    asyncio.create_task(fetch_and_store_incidents(result.inserted_id))
-    asyncio.create_task(_initial_risk_assessment(result.inserted_id, doc))
+    if data.upstream_shipment_id:
+        try:
+            await db.shipment_dependencies.insert_one({
+                "parent_shipment_id": ObjectId(data.upstream_shipment_id),
+                "child_shipment_id":  result.inserted_id,
+                "delay_sensitivity_hours": round(eta_hours, 2),
+                "created_at": now,
+            })
+        except Exception as e:
+            logger.warning(f"Failed to insert shipment_dependency for {result.inserted_id}: {e}")
 
-    logger.info(f"Shipment created: {result.inserted_id} | {data.origin_name} → {data.destination_name} | {tracking_number}")
+    # Enqueue risk assessment and incident fetching to the background so the UI doesn't block waiting for Gemini API.
+    background_tasks.add_task(_background_assessment_task, str(result.inserted_id))
+
+    logger.info(f"Shipment created (background assessment enqueued): {result.inserted_id} | {data.origin_name} → {data.destination_name} | {tracking_number}")
     return _serialize(doc)
 
 
@@ -264,6 +340,10 @@ async def update_shipment(id: str, data: ShipmentUpdate):
         }
     if data.status is not None:
         updates["status"] = data.status
+        if data.status == "in_transit":
+            # Force reset simulation timestamp so the vehicle physically departs from Origin line right now
+            updates["created_at"] = datetime.now(timezone.utc)
+            
     if data.auto_reroute_enabled is not None:
         updates["auto_reroute_enabled"] = data.auto_reroute_enabled
 

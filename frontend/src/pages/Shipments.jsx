@@ -1,6 +1,6 @@
-import { memo, useState, useMemo, useRef, useEffect } from 'react';
+import { memo, useState, useMemo, useRef, useEffect, Fragment } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Package, ShieldAlert, Navigation, Search, Filter, Plus, Pencil, Trash2, X, ChevronDown, Eye } from 'lucide-react';
+import { Package, ShieldAlert, Navigation, Search, Filter, Plus, Pencil, Trash2, X, ChevronDown, ChevronUp, Eye, Loader2 } from 'lucide-react';
 import { AreaChart, Area, ResponsiveContainer, YAxis } from 'recharts';
 import { useShipments, useDeleteShipment } from '../hooks/useShipments';
 import { useShipmentStore } from '../stores/shipmentStore';
@@ -44,7 +44,7 @@ const calculateProgress = (shipment) => {
   const now = Date.now();
   const elapsed = (now - created) / 1000;
   
-  const simulatedElapsed = elapsed * 50; 
+  const simulatedElapsed = elapsed * 5; 
   const progress = Math.min((simulatedElapsed / shipment.expected_travel_seconds) * 100, 100);
   return progress;
 };
@@ -56,6 +56,82 @@ const formatEta = (hours) => {
   if (d > 0) return `${d}d ${h}h ETA`;
   return `${h}h ETA`;
 };
+
+const fmtDate = (dt) => {
+  if (!dt) return '—';
+  return new Date(dt).toLocaleString('en-IN', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  });
+};
+
+const DependencyLines = memo(function DependencyLines({ shipments }) {
+  const [lines, setLines] = useState([]);
+
+  useEffect(() => {
+    const updateLines = () => {
+      const container = document.getElementById('shipments-table-container');
+      const table = container?.querySelector('table');
+      if (!container || !table) return;
+
+      const containerRect = container.getBoundingClientRect();
+      const newLines = [];
+
+      shipments.forEach(shipment => {
+        if (shipment.upstream_shipment_id) {
+          const childRow = document.getElementById(`row-${shipment.id}`);
+          const parentRow = document.getElementById(`row-${shipment.upstream_shipment_id}`);
+
+          if (childRow && parentRow) {
+            const cRect = childRow.getBoundingClientRect();
+            const pRect = parentRow.getBoundingClientRect();
+
+            const yParent = pRect.top - containerRect.top + (pRect.height / 2);
+            const yChild = cRect.top - containerRect.top + (cRect.height / 2);
+            const x = 12; 
+
+            // Only draw if they are vertically separated sequentially
+            if (Math.abs(yParent - yChild) > 20) {
+                // Determine direction to curve arrows properly regardless of sorting
+                const startY = Math.min(yParent, yChild);
+                const endY   = Math.max(yParent, yChild);
+                
+                newLines.push({
+                  id: shipment.id,
+                  d: `M ${x + 16} ${startY} Q ${x} ${startY} ${x} ${startY + 16} L ${x} ${endY - 16} Q ${x} ${endY} ${x + 16} ${endY}`
+                });
+            }
+          }
+        }
+      });
+      setLines(newLines);
+    };
+
+    updateLines();
+    const interval = setInterval(updateLines, 500);
+
+    return () => clearInterval(interval);
+  }, [shipments]);
+
+  if (!lines.length) return null;
+
+  return (
+    <svg className="absolute inset-0 pointer-events-none z-0" style={{ width: '100%', height: '100%', minHeight: '100%' }}>
+      {lines.map((l) => (
+        <path
+          key={l.id}
+          d={l.d}
+          fill="none"
+          stroke="#60a5fa"
+          strokeWidth="2.5"
+          strokeDasharray="4 6"
+          strokeLinecap="round"
+          className="opacity-70 animate-[dash-flow_6s_linear_infinite]"
+        />
+      ))}
+    </svg>
+  );
+});
 
 const Shipments = memo(function Shipments() {
   const { isLoading, error } = useShipments();
@@ -70,6 +146,7 @@ const Shipments = memo(function Shipments() {
   const [searchQuery, setSearchQuery]     = useState('');
   const [statusFilter, setStatusFilter]   = useState('all');
   const [showFilterMenu, setShowFilterMenu] = useState(false);
+  const [expandedId, setExpandedId]       = useState(null);
 
   const filterRef = useRef(null);
   useEffect(() => {
@@ -251,16 +328,18 @@ const Shipments = memo(function Shipments() {
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-theme-secondary rounded-2xl overflow-hidden border border-theme shadow-lg"
+        className="relative bg-theme-secondary rounded-2xl overflow-hidden border border-theme shadow-lg"
       >
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+        <div className="overflow-x-auto relative min-h-[300px]" id="shipments-table-container">
+          <DependencyLines shipments={filteredShipments} />
+          <table className="w-full text-left border-collapse relative z-10">
             <thead>
               <tr className="bg-theme-tertiary text-theme-secondary text-xs uppercase tracking-widest">
                 <th className="py-4 px-6 font-semibold">Tracking ID</th>
                 <th className="py-4 px-6 font-semibold">Route</th>
                 <th className="py-4 px-6 font-semibold">Status</th>
-                <th className="py-4 px-6 font-semibold">Environment</th>
+                <th className="py-4 px-6 font-semibold text-center">Duration</th>
+                <th className="py-4 px-6 font-semibold text-center">ETA Arrival</th>
                 <th className="py-4 px-6 font-semibold text-center">Risk Intel</th>
                 <th className="py-4 px-6 font-semibold text-right">Actions</th>
               </tr>
@@ -268,7 +347,7 @@ const Shipments = memo(function Shipments() {
             <tbody className="divide-y divide-theme">
               {filteredShipments.length === 0 ? (
                 <tr>
-                  <td colSpan="6" className="py-20 text-center text-theme-secondary">
+                  <td colSpan="7" className="py-20 text-center text-theme-secondary">
                     <div className="flex flex-col items-center justify-center gap-3">
                       <Package className="w-10 h-10 opacity-30" />
                       <span className="text-sm font-medium uppercase tracking-widest">
@@ -284,38 +363,76 @@ const Shipments = memo(function Shipments() {
                   const isCritical = riskLevel === 'high' || riskLevel === 'critical';
                   const isWarning  = riskLevel === 'medium';
 
+                  // Resolve upstream shipment from store (works for both old and new shipments)
+                  const upstreamShipment = shipment.upstream_shipment_id
+                    ? shipments.find(s => s.id === shipment.upstream_shipment_id)
+                    : null;
+
+                  // Effective departure time — prefer stored field, fall back to upstream's original_eta
+                  const departureDt = shipment.scheduled_departure
+                    ? new Date(shipment.scheduled_departure)
+                    : upstreamShipment?.original_eta
+                      ? new Date(upstreamShipment.original_eta)
+                      : null;
+                  const waitHours = departureDt
+                    ? Math.max(0, (departureDt - Date.now()) / 3_600_000)
+                    : 0;
+
+                  // Final arrival datetime for this shipment
+                  const arrivalDt = departureDt
+                    ? new Date(departureDt.getTime() + (parseFloat(shipment.eta_hours) || 0) * 3_600_000)
+                    : shipment.original_eta
+                      ? new Date(shipment.original_eta)
+                      : null;
+
+                  // Upstream chain card dates
+                  const upstreamArrivalDt = upstreamShipment?.original_eta
+                    ? new Date(upstreamShipment.original_eta) : null;
+                  const upstreamDepartureDt = upstreamArrivalDt && upstreamShipment?.eta_hours
+                    ? new Date(upstreamArrivalDt.getTime() - (parseFloat(upstreamShipment.eta_hours) || 0) * 3_600_000)
+                    : null;
+
                   return (
+                    <Fragment key={shipment.id}>
                     <tr
-                      key={shipment.id}
+                      id={`row-${shipment.id}`}
                       className={cn(
-                        'group transition-colors hover:bg-theme-tertiary/50 cursor-pointer',
+                        'group transition-colors hover:bg-theme-tertiary/50 cursor-pointer relative z-10',
                         isCritical && 'bg-red-500/5'
                       )}
                       onClick={() => setInspectingShipmentId(shipment.id)}
                     >
                       <td className="py-4 px-6">
-                        <span className="font-mono text-sm font-semibold text-theme-primary bg-theme-tertiary px-2 py-1 rounded">
-                          {shipment.tracking_number}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-sm font-semibold text-theme-primary bg-theme-tertiary px-2 py-1 rounded">
+                            {shipment.tracking_number}
+                          </span>
+                        </div>
                       </td>
 
                       <td className="py-4 px-6">
                         <div className="flex flex-col gap-1.5 w-full min-w-[200px]">
-                          <div className="flex items-center flex-wrap gap-2 text-[12px] overflow-hidden">
-                            <span className="text-theme-secondary shrink-0">{shipment.origin_name || shipment.origin}</span>
+                          <div className="flex flex-col gap-3 relative text-[12px] py-1">
+                            <div className="absolute left-[4px] top-2.5 bottom-2.5 w-[2px] bg-theme-tertiary -z-0"></div>
+
+                            <div className="flex items-center gap-2.5 z-10">
+                              <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-[3px] ring-theme-secondary shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+                              <span className="text-theme-secondary font-medium tracking-wide">{shipment.origin_name || shipment.origin}</span>
+                            </div>
                             
                             {shipment.via_points?.map((vp, idx) => (
-                              <div key={idx} className="flex items-center gap-1.5 shrink-0">
-                                <span className="text-theme-secondary font-bold opacity-30">→</span>
-                                <span className="flex items-center gap-1 text-theme-primary bg-theme-tertiary px-1.5 py-0.5 rounded-md border border-theme shadow-sm">
-                                  <span className="text-[10px]">{vp.type === 'pickup' ? '📦' : vp.type === 'delivery' ? '📍' : '⚙️'}</span>
-                                  <span className="truncate max-w-[100px] font-medium">{vp.location_name}</span>
-                                </span>
+                              <div key={idx} className="flex items-center gap-2.5 z-10">
+                                <div className="bg-theme-secondary ml-[-4px] p-0.5 rounded-md border border-theme/40 flex items-center justify-center">
+                                  <span className="text-[11px] leading-none">{vp.type === 'pickup' ? '📦' : vp.type === 'delivery' ? '📍' : '⚙️'}</span>
+                                </div>
+                                <span className="text-theme-primary truncate w-[160px] font-semibold">{vp.location_name}</span>
                               </div>
                             ))}
 
-                            <span className="text-theme-secondary font-bold opacity-30 shrink-0">→</span>
-                            <span className="text-theme-primary font-bold truncate shrink-0">{shipment.destination_name || shipment.destination}</span>
+                            <div className="flex items-center gap-2.5 z-10">
+                              <div className="w-2.5 h-2.5 rounded-full bg-red-500 ring-[3px] ring-theme-secondary shadow-[0_0_8px_rgba(239,68,68,0.5)]"></div>
+                              <span className="text-theme-primary font-bold truncate tracking-wide">{shipment.destination_name || shipment.destination}</span>
+                            </div>
                           </div>
                           {(shipment.distance_km || shipment.eta_hours) ? (
                              <div className="text-[10px] uppercase font-bold tracking-widest text-theme-secondary flex items-center justify-between mt-1">
@@ -339,37 +456,92 @@ const Shipments = memo(function Shipments() {
                         </span>
                       </td>
 
-                      <td className="py-4 px-6">
-                        <div className="text-xs text-theme-secondary flex flex-col gap-0.5">
-                          {shipment.conditions?.weather && <span>{shipment.conditions.weather}</span>}
-                          {shipment.conditions?.traffic && <span className="opacity-60">{shipment.conditions.traffic}</span>}
+                      <td className="py-4 px-6 text-center">
+                        {(() => {
+                          const progress = calculateProgress(shipment);
+                          const r = 22;
+                          const circ = 2 * Math.PI * r;
+                          const offset = circ * (1 - progress / 100);
+                          const ownHours = parseFloat(shipment.eta_hours) || 0;
+                          const hours = waitHours + ownHours;
+                          const d = Math.floor(hours / 24);
+                          const h = Math.round(hours % 24);
+                          return (
+                            <div className="flex items-center justify-center">
+                              <div className="relative w-14 h-14 flex items-center justify-center">
+                                <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 56 56">
+                                  <circle cx="28" cy="28" r={r} fill="none" strokeWidth="3" stroke="var(--border-color)" />
+                                  <circle cx="28" cy="28" r={r} fill="none" strokeWidth="3" strokeLinecap="round"
+                                    strokeDasharray={circ} strokeDashoffset={offset}
+                                    stroke="var(--accent)" style={{ transition: 'stroke-dashoffset 1s ease' }}
+                                  />
+                                </svg>
+                                <div className="flex flex-col items-center leading-none z-10">
+                                  {d > 0 ? (
+                                    <>
+                                      <span className="text-[11px] font-bold text-theme-primary">{d}d</span>
+                                      <span className="text-[10px] font-semibold text-theme-secondary">{h}h</span>
+                                    </>
+                                  ) : (
+                                    <span className="text-[12px] font-bold text-theme-primary">{h}h</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </td>
+
+                      {/* ETA Arrival column */}
+                      <td className="py-4 px-6 text-center">
+                        <div className="flex flex-col items-center gap-1">
+                          <p className="text-xs font-bold text-theme-primary font-mono leading-tight">
+                            {fmtDate(arrivalDt)}
+                          </p>
+                          {shipment.is_delayed && (
+                            <span className="text-[9px] font-bold text-red-400 uppercase tracking-wide">
+                              +{(shipment.delay_minutes / 60).toFixed(1)}h delay
+                            </span>
+                          )}
+                          {departureDt && !shipment.is_delayed && (
+                            <span className="text-[9px] text-blue-400 font-bold uppercase tracking-wide">via upstream</span>
+                          )}
                         </div>
                       </td>
 
                       <td className="py-4 px-6 text-center">
                         <div className="flex flex-col items-center justify-center gap-2">
-                          <div className={cn(
-                            'inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold',
-                            riskBadgeClass(riskLevel)
-                          )}>
-                            <ShieldAlert className="w-3.5 h-3.5" />
-                            {riskScore.toFixed(0)} ({riskLevel})
-                          </div>
-                          {shipment.risk?.history?.length > 1 && (
-                            <div className="h-8 w-24 mx-auto hover:opacity-100 transition-opacity">
-                              <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart data={shipment.risk.history.map((h, i) => ({ val: h.risk_score, idx: i }))}>
-                                   <defs>
-                                     <linearGradient id={`colorRisk-${shipment.id}`} x1="0" y1="0" x2="0" y2="1">
-                                       <stop offset="5%" stopColor={isCritical ? "#ef4444" : isWarning ? "#eab308" : "#10b981"} stopOpacity={0.3}/>
-                                       <stop offset="95%" stopColor={isCritical ? "#ef4444" : isWarning ? "#eab308" : "#10b981"} stopOpacity={0}/>
-                                     </linearGradient>
-                                   </defs>
-                                   <YAxis domain={[0, 100]} hide />
-                                   <Area type="monotone" dataKey="val" stroke={isCritical ? "#ef4444" : isWarning ? "#eab308" : "#10b981"} fill={`url(#colorRisk-${shipment.id})`} strokeWidth={2} isAnimationActive={false} />
-                                </AreaChart>
-                              </ResponsiveContainer>
+                          {shipment.risk?.current?.reason === 'Initial assessment pending' ? (
+                            <div className="inline-flex items-center justify-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold bg-theme-tertiary text-theme-secondary border border-theme/50 shadow-sm">
+                              <Loader2 className="w-3.5 h-3.5 text-accent animate-spin" />
+                              <span className="tracking-wide">ANALYZING</span>
                             </div>
+                          ) : (
+                            <>
+                              <div className={cn(
+                                'inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold',
+                                riskBadgeClass(riskLevel)
+                              )}>
+                                <ShieldAlert className="w-3.5 h-3.5" />
+                                {riskScore.toFixed(0)} ({riskLevel})
+                              </div>
+                              {shipment.risk?.history?.length > 1 && (
+                                <div className="h-8 w-24 mx-auto hover:opacity-100 transition-opacity">
+                                  <ResponsiveContainer width="100%" height="100%">
+                                    <AreaChart data={shipment.risk.history.map((h, i) => ({ val: h.risk_score, idx: i }))}>
+                                       <defs>
+                                         <linearGradient id={`colorRisk-${shipment.id}`} x1="0" y1="0" x2="0" y2="1">
+                                           <stop offset="5%" stopColor={isCritical ? "#ef4444" : isWarning ? "#eab308" : "#10b981"} stopOpacity={0.3}/>
+                                            <stop offset="95%" stopColor={isCritical ? "#ef4444" : isWarning ? "#eab308" : "#10b981"} stopOpacity={0}/>
+                                         </linearGradient>
+                                       </defs>
+                                       <YAxis domain={[0, 100]} hide />
+                                       <Area type="monotone" dataKey="val" stroke={isCritical ? "#ef4444" : isWarning ? "#eab308" : "#10b981"} fill={`url(#colorRisk-${shipment.id})`} strokeWidth={2} isAnimationActive={false} />
+                                    </AreaChart>
+                                  </ResponsiveContainer>
+                                </div>
+                              )}
+                            </>
                           )}
                         </div>
                       </td>
@@ -405,6 +577,114 @@ const Shipments = memo(function Shipments() {
                         </div>
                       </td>
                     </tr>
+
+                    {/* Expanded chain timeline row By Default */}
+                    <AnimatePresence>
+                      {shipment.upstream_shipment_id && (
+                        <tr key={`expand-${shipment.id}`}>
+                          <td colSpan="7" className="px-0 py-0 border-0">
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.22, ease: 'easeInOut' }}
+                              className="overflow-hidden border-t border-b border-blue-500/15 relative z-0"
+                              style={{ background: 'color-mix(in srgb, var(--color-accent, #3b82f6) 3%, transparent)' }}
+                            >
+                              <div className="px-8 py-5">
+                                <p className="text-[9px] font-black text-blue-400 uppercase tracking-[0.2em] mb-4">
+                                  Shipment Chain Timeline
+                                </p>
+                                <div className="space-y-0">
+
+                                  {/* Upstream node */}
+                                  {upstreamShipment && (
+                                    <div className="flex items-start gap-4 pl-1">
+                                      <div className="flex flex-col items-center pt-0.5">
+                                        <div className="w-3 h-3 rounded-full bg-blue-400 ring-2 ring-blue-400/30 shrink-0" />
+                                        <div className="w-px grow min-h-[36px] bg-blue-400/30 my-1" />
+                                      </div>
+                                      <div className="flex-1 pb-3 grid grid-cols-4 gap-x-6">
+                                        <div>
+                                          <p className="text-[8px] font-black text-blue-400 uppercase tracking-widest mb-0.5">Upstream</p>
+                                          <p className="text-[11px] font-bold text-theme-primary font-mono">
+                                            {upstreamShipment.tracking_number}
+                                          </p>
+                                          <p className="text-[10px] text-theme-secondary">{upstreamShipment.shipment_name}</p>
+                                        </div>
+                                        <div>
+                                          <p className="text-[8px] text-theme-secondary uppercase tracking-widest font-bold mb-0.5">Route</p>
+                                          <p className="text-[10px] text-theme-primary font-semibold">
+                                            {upstreamShipment.origin_name || upstreamShipment.origin}
+                                          </p>
+                                          <p className="text-[10px] text-theme-secondary">
+                                            → {upstreamShipment.destination_name || upstreamShipment.destination}
+                                          </p>
+                                        </div>
+                                        <div>
+                                          <p className="text-[8px] text-theme-secondary uppercase tracking-widest font-bold mb-0.5">Departs</p>
+                                          <p className="text-[10px] font-mono text-theme-primary">{fmtDate(upstreamDepartureDt)}</p>
+                                        </div>
+                                        <div>
+                                          <p className="text-[8px] text-theme-secondary uppercase tracking-widest font-bold mb-0.5">Arrives / Handoff</p>
+                                          <p className="text-[10px] font-mono text-blue-400 font-bold">{fmtDate(upstreamArrivalDt)}</p>
+                                          <p className="text-[9px] text-theme-secondary">{upstreamShipment.eta_hours}h travel</p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* This shipment node */}
+                                  <div className="flex items-start gap-4 pl-1">
+                                    <div className="flex flex-col items-center pt-0.5">
+                                      <div className="w-3 h-3 rounded-full bg-accent ring-2 ring-accent/30 shrink-0" />
+                                    </div>
+                                    <div className="flex-1 grid grid-cols-4 gap-x-6">
+                                      <div>
+                                        <p className="text-[8px] font-black text-accent uppercase tracking-widest mb-0.5">
+                                          {upstreamShipment ? 'This Shipment' : 'Shipment'}
+                                        </p>
+                                        <p className="text-[11px] font-bold text-theme-primary font-mono">
+                                          {shipment.tracking_number}
+                                        </p>
+                                        <p className="text-[10px] text-theme-secondary">{shipment.shipment_name}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-[8px] text-theme-secondary uppercase tracking-widest font-bold mb-0.5">Route</p>
+                                        <p className="text-[10px] text-theme-primary font-semibold">
+                                          {shipment.origin_name || shipment.origin}
+                                        </p>
+                                        <p className="text-[10px] text-theme-secondary">
+                                          → {shipment.destination_name || shipment.destination}
+                                        </p>
+                                      </div>
+                                      <div>
+                                        <p className="text-[8px] text-theme-secondary uppercase tracking-widest font-bold mb-0.5">
+                                          {departureDt ? 'Departs (after handoff)' : 'Departs'}
+                                        </p>
+                                        <p className="text-[10px] font-mono text-theme-primary">{fmtDate(departureDt)}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-[8px] text-theme-secondary uppercase tracking-widest font-bold mb-0.5">Est. Arrival</p>
+                                        <p className="text-[10px] font-mono text-green-400 font-bold">{fmtDate(arrivalDt)}</p>
+                                        {shipment.is_delayed && (
+                                          <p className="text-[9px] text-red-400 font-bold">
+                                            +{(shipment.delay_minutes / 60).toFixed(1)}h cascaded delay
+                                          </p>
+                                        )}
+                                        <p className="text-[9px] text-theme-secondary">{shipment.eta_hours}h travel</p>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                </div>
+                              </div>
+                            </motion.div>
+                          </td>
+                        </tr>
+                      )}
+                    </AnimatePresence>
+                    </Fragment>
                   );
                 })
               )}

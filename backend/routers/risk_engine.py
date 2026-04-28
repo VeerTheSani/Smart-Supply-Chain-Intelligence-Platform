@@ -6,11 +6,13 @@
 
 import logging
 import math
+import asyncio
 from datetime import datetime, timezone
 from typing import Optional
 
 from services.weather_service import score_weather_along_route
 from services.mappls_service import get_route
+from services.gemini_service import get_road_disturbance_score
 
 logger = logging.getLogger(__name__)
 
@@ -153,19 +155,41 @@ def _compute_event_score(stored_incidents: list[dict]) -> dict:
         }
 
     total = 0.0
+    highest_severity_inc = None
+    max_inc_score = -1
+
+    from collections import Counter
+    counts = Counter(i.get("type", "UNKNOWN").replace("_", " ").title() for i in stored_incidents)
+
     for inc in stored_incidents:
         base = INCIDENT_SCORE_MAP.get(inc.get("type", ""), 5)
         mult = MAGNITUDE_MULT.get(inc.get("severity", 0), 1.0)
-        total += base * mult
+        inc_score = base * mult
+        total += inc_score
+        
+        if inc_score > max_inc_score:
+            max_inc_score = inc_score
+            highest_severity_inc = inc
 
     score  = min(round(total), 100)
-    reason = stored_incidents[0]["description"] if stored_incidents else "No incidents on route"
+    
+    if highest_severity_inc:
+        count_strs = [f"{c} {t}{'s' if c > 1 and not t.endswith('s') else ''}" for t, c in counts.most_common()]
+        reason = f"{len(stored_incidents)} System Events ({', '.join(count_strs)}). Primary concern: {highest_severity_inc['description']}"
+        
+        events_found = [f"Total of {len(stored_incidents)} telemetry disruptions plotted on route"]
+        for t, c in counts.most_common():
+            events_found.append(f"{c} {t}{'s' if c > 1 and not t.endswith('s') else ''} recorded.")
+        events_found.append(f"Key Threat: {highest_severity_inc['description']}")
+    else:
+        reason = "No incidents on route"
+        events_found = []
 
     return {
         "score":          score,
         "reason":         reason,
         "weight":         WEIGHTS["events"],
-        "events_found":   [i["description"] for i in stored_incidents[:5]],
+        "events_found":   events_found,
         "incident_count": len(stored_incidents),
     }
 
@@ -200,8 +224,45 @@ def _compute_time_buffer_score(created_at: datetime, eta_seconds: Optional[int])
 
 # historycal data, pathetical value but still has some wetightage , i like it tbh
 
-def _compute_historical_score() -> dict:
-    return {"score": 0, "reason": "No historical data", "weight": WEIGHTS["historical"]}
+async def _compute_historical_score(
+    road_names: list[str],
+    planned_date: str,
+    risk_level: str,
+    origin: str = "",
+    destination: str = "",
+    via_point_names: list[str] = [],
+) -> dict:
+    from services.gemini_service import get_road_disturbance_score
+    try:
+        res = await get_road_disturbance_score(
+            road_names, planned_date, risk_level,
+            origin=origin, destination=destination, via_points=via_point_names,
+        )
+        
+        incident_location = res.get("incident_location", "")
+        incident_coords = None
+        
+        if incident_location and "unavailable" not in incident_location.lower():
+            try:
+                from services.mappls_service import geocode
+                geo = await geocode(incident_location)
+                incident_coords = {"lat": geo["lat"], "lng": geo["lng"]}
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Failed to geocode Gemini incident location '{incident_location}': {e}")
+
+        return {
+            "score":             res["score"],
+            "reason":            res["reason"],
+            "weight":            WEIGHTS["historical"],
+            "incident_location": incident_location,
+            "incident_coords":   incident_coords,
+            "safe_waypoint":     res.get("safe_waypoint", ""),
+        }
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Historical risk failed: {e}")
+        return {"score": 0, "reason": "unavailable", "weight": WEIGHTS["historical"]}
 
 
 #main masalaa , with protin tube with white soas
@@ -218,18 +279,38 @@ async def calculate_risk(shipment: dict) -> dict:
         created_at = datetime.fromisoformat(created_at)
 
     stored_incidents = shipment.get("route_incidents", [])
+    road_names       = shipment.get("road_names", [])
+    planned_date     = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    prev_risk_lvl    = (shipment.get("risk") or {}).get("current", {}).get("risk_level", "low")
+    origin_name      = shipment.get("origin_name") or shipment.get("origin_resolved", "")
+    destination_name = shipment.get("destination_name") or shipment.get("destination_resolved", "")
+    via_point_names  = [vp["location_name"] for vp in shipment.get("via_points", []) if vp.get("location_name")]
 
     logger.info(f"Calculating risk for shipment with {len(waypoints)} waypoints, {len(stored_incidents)} stored incidents")
 
-    import asyncio
-    weather_data, traffic_data = await asyncio.gather(
-        _compute_weather_score(waypoints, current_location, origin_coords, eta_seconds, distance_km),
-        _compute_traffic_score(current_location, dest_coords),
-    )
+    skip_gemini = shipment.get("_skip_gemini", False)
+    
+    if skip_gemini:
+        historical_data = (shipment.get("last_risk_assessment", {}) or {}).get("breakdown", {}).get("historical", {
+            "score": 0, "reason": "No disruption currently active", "weight": WEIGHTS["historical"]
+        })
+        weather_data, traffic_data = await asyncio.gather(
+            _compute_weather_score(waypoints, current_location, origin_coords, eta_seconds, distance_km),
+            _compute_traffic_score(current_location, dest_coords),
+        )
+        logger.debug(f"Skipping Gemini for shipment {shipment.get('_id')} — using cached AI score: {historical_data['score']}")
+    else:
+        weather_data, traffic_data, historical_data = await asyncio.gather(
+            _compute_weather_score(waypoints, current_location, origin_coords, eta_seconds, distance_km),
+            _compute_traffic_score(current_location, dest_coords),
+            _compute_historical_score(
+                road_names, planned_date, prev_risk_lvl,
+                origin=origin_name, destination=destination_name, via_point_names=via_point_names,
+            ),
+        )
     event_data = _compute_event_score(stored_incidents)
 
     time_buffer_data = _compute_time_buffer_score(created_at, eta_seconds)
-    historical_data  = _compute_historical_score()
 
     # Apply simulation overrides if present
     simulated_scenario = shipment.get("_simulated_scenario")
