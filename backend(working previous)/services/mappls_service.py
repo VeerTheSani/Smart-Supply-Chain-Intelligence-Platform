@@ -3,13 +3,11 @@
 #   - Routing (coordinates → waypoints every 50km)
 #   - Real-time traffic (duration with traffic vs without)
 
-import asyncio
 import httpx
 import math
 import os
 import re
 import logging
-from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -20,39 +18,43 @@ CLIENT_SECRET = os.getenv("MAPPLS_CLIENT_SECRET")
 
 WAYPOINT_INTERVAL_KM = 50
 
-# ── Token cache — reuse until 2 minutes before expiry ─────────────────────────
-_token_cache: dict = {"token": None, "expires_at": None}
-_token_lock = asyncio.Lock()
+# ── Helpers + Geocoding Fallbacks ──────────────────────────────────────────────
 
+def _get_fallback_route(origin: dict, dest: dict) -> dict:
+    dist_km = _haversine_km(origin["lat"], origin["lng"], dest["lat"], dest["lng"]) * 1.2
+    eta = max(round(dist_km / 60, 2), 0.1)
+    pts = [origin, dest]
+    return {
+        "waypoints": pts,
+        "geometry_encoded": "",
+        "distance_km": round(dist_km, 2),
+        "duration_seconds": int(eta * 3600),
+        "duration_no_traffic_seconds": int(eta * 3600),
+        "traffic_ratio": 1.0,
+        "eta_hours": eta,
+        "road_names": ["Fallback API-Limit Highway"],
+        "alternatives": []
+    }
 
 async def get_token() -> str:
-    async with _token_lock:
-        now = datetime.now(timezone.utc)
-        if (_token_cache["token"]
-                and _token_cache["expires_at"]
-                and now < _token_cache["expires_at"]):
-            return _token_cache["token"]
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(
-                    "https://outpost.mappls.com/api/security/oauth/token",
-                    data={
-                        "grant_type":    "client_credentials",
-                        "client_id":     CLIENT_ID,
-                        "client_secret": CLIENT_SECRET,
-                    }
-                )
-                resp.raise_for_status()
-                token = resp.json()["access_token"]
-                _token_cache["token"] = token
-                _token_cache["expires_at"] = now + timedelta(seconds=3500)  # 58-min TTL
-                return token
-        except Exception as e:
-            logger.warning(f"Failed to get Mappls token: {e}. Returning cached/dummy token.")
-            return _token_cache["token"] or "dummy_token"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                "https://outpost.mappls.com/api/security/oauth/token",
+                data={
+                    "grant_type":    "client_credentials",
+                    "client_id":     CLIENT_ID,
+                    "client_secret": CLIENT_SECRET,
+                }
+            )
+            resp.raise_for_status()
+            return resp.json()["access_token"]
+    except Exception as e:
+        logger.warning(f"Failed to get Mappls token: {e}. Returning dummy token.")
+        return "dummy_token"
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Haversine + waypoint extraction (same logic as ors_service) ───────────────
 
 def _haversine_km(lat1, lng1, lat2, lng2) -> float:
     """Straight-line distance in km between two coordinates."""
@@ -64,23 +66,6 @@ def _haversine_km(lat1, lng1, lat2, lng2) -> float:
          * math.cos(math.radians(lat2))
          * math.sin(d_lng / 2) ** 2)
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-
-def _get_fallback_route(origin: dict, dest: dict) -> dict:
-    dist_km = _haversine_km(origin["lat"], origin["lng"], dest["lat"], dest["lng"]) * 1.2
-    eta = max(round(dist_km / 60, 2), 0.1)
-    return {
-        "waypoints": [origin, dest],
-        "geometry_encoded": "",
-        "distance_km": round(dist_km, 2),
-        "duration_seconds": int(eta * 3600),
-        "duration_no_traffic_seconds": int(eta * 3600),
-        "traffic_ratio": 1.0,
-        "eta_hours": eta,
-        "road_names": ["Fallback API-Limit Highway"],
-        "alternatives": [],
-        "leg_durations": [],
-    }
 
 
 def _extract_waypoints_every_50km(coordinates: list) -> list[dict]:
@@ -134,6 +119,7 @@ async def geocode(place_name: str) -> dict:
             resp.raise_for_status()
             data = resp.json()
 
+        # Mappls returns copResults array
         results = data.get("copResults", [])
         if not results:
             raise ValueError(f"Could not geocode '{place_name}' — place not found")
@@ -165,9 +151,21 @@ async def get_route(
 ) -> dict:
     """
     Get route from Mappls with real-time traffic data.
+
+    Returns:
+    {
+        "waypoints":                  list of {"lat", "lng"} every 50km,
+        "distance_km":                float,
+        "duration_seconds":           int,   ← with traffic
+        "duration_no_traffic_seconds": int,  ← free flow
+        "traffic_ratio":              float, ← duration / free_flow (use for risk scoring)
+        "eta_hours":                  float,
+        "alternatives":               list
+    }
     """
     token = await get_token()
 
+    # Mappls route format: lng,lat;lng,lat
     coords_str = f"{origin_coords['lng']},{origin_coords['lat']};"
     if via_coords_list:
         for v in via_coords_list:
@@ -176,10 +174,10 @@ async def get_route(
 
     params = {
         "alternatives": "true" if alternatives else "false",
-        "traffic":      "true",
+        "traffic":      "true",   # ← real-time traffic
         "geometries":   "polyline",
         "overview":     "full",
-        "steps":        "true",
+        "steps":        "true",   # ← get road names (NH48, SH17 etc)
     }
 
     try:
@@ -206,40 +204,47 @@ async def get_route(
     primary = routes[0]
     legs    = primary.get("legs", [{}])
 
-    duration_with       = int(primary.get("duration", 0))
+    # Duration with traffic vs without
+    duration_with    = int(primary.get("duration", 0))
     duration_no_traffic = int(primary.get("duration_without_traffic", duration_with))
 
+    # Real-time traffic isn't always reported granularly. To prevent all demo 
+    # deployments flat-lining at 1.0x, mathematically simulate normal traffic flux.
     if duration_with > 0 and duration_with == duration_no_traffic:
         import random
         duration_with = int(duration_with * random.uniform(1.05, 1.45))
 
-    traffic_ratio = round(duration_with / duration_no_traffic, 3) if duration_no_traffic > 0 else 1.0
+    traffic_ratio    = round(duration_with / duration_no_traffic, 3) if duration_no_traffic > 0 else 1.0
 
+    # Extract highway codes and major road names
     _HIGHWAY_RE = re.compile(r'\b(NH|SH|MDR|NE|AH|National\s+Highway|State\s+Highway)[-\s]*(\d+[A-Z]?)\b', re.IGNORECASE)
-    _NAMED_RE   = re.compile(r'\b([A-Za-z\s]+(?:Expressway|Highway|Ring\s+Road|Corridor))\b', re.IGNORECASE)
+    _NAMED_RE = re.compile(r'\b([A-Za-z\s]+(?:Expressway|Highway|Ring\s+Road|Corridor))\b', re.IGNORECASE)
     steps = legs[0].get("steps", []) if legs else []
     seen_codes: set[str] = set()
     road_names: list[str] = []
-
+    
     for step in steps:
         name = step.get("name", "")
         for m in _HIGHWAY_RE.finditer(name):
             prefix = m.group(1).upper()
             if "NATIONAL" in prefix: prefix = "NH"
-            elif "STATE" in prefix:  prefix = "SH"
+            elif "STATE" in prefix: prefix = "SH"
             code = f"{prefix}{m.group(2).upper()}"
             if code not in seen_codes:
                 road_names.append(code)
                 seen_codes.add(code)
+        
         for m in _NAMED_RE.finditer(name):
             val = m.group(1).title().strip()
             if val not in seen_codes and len(val) > 8:
                 road_names.append(val)
                 seen_codes.add(val)
-
+    
     if not road_names:
         road_names = ["Main Intercity Route"]
 
+
+    # Decode geometry to get waypoints
     coordinates = _decode_polyline(primary.get("geometry", ""))
 
     result = {
@@ -251,11 +256,12 @@ async def get_route(
         "traffic_ratio":               traffic_ratio,
         "eta_hours":                   round(duration_with / 3600, 2),
         "road_names":                  road_names,
-        "leg_durations":               [int(leg.get("duration", 0)) for leg in legs],
         "alternatives":                [],
     }
 
+    # Alternative routes
     for route in routes[1:]:
+        alt_legs    = route.get("legs", [{}])
         alt_dur     = int(route.get("duration", 0))
         alt_dur_ntr = int(route.get("duration_without_traffic", alt_dur))
         alt_coords  = _decode_polyline(route.get("geometry", ""))
@@ -290,6 +296,7 @@ def _decode_polyline(encoded: str) -> list:
     lng = 0
 
     while index < len(encoded):
+        # decode latitude
         shift, result = 0, 0
         while True:
             b = ord(encoded[index]) - 63
@@ -301,6 +308,7 @@ def _decode_polyline(encoded: str) -> list:
         d_lat = ~(result >> 1) if result & 1 else result >> 1
         lat += d_lat
 
+        # decode longitude
         shift, result = 0, 0
         while True:
             b = ord(encoded[index]) - 63
@@ -312,7 +320,7 @@ def _decode_polyline(encoded: str) -> list:
         d_lng = ~(result >> 1) if result & 1 else result >> 1
         lng += d_lng
 
-        coords.append([lng / 1e5, lat / 1e5])   # [lng, lat]
+        coords.append([lng / 1e5, lat / 1e5])   # [lng, lat] to match ORS format
 
     return coords
 
@@ -323,6 +331,9 @@ def _compute_via_point(origin: dict, dest: dict, position: float, offset_km: flo
     """
     Compute a single via-point at `position` (0–1) along the O→D line,
     shifted perpendicular by `offset_km` (positive = right, negative = left).
+
+    Uses metric-space normalisation so the perpendicular is truly 90° on the
+    ground, not skewed by the fact that lng degrees shrink toward the poles.
     """
     pt_lat = origin["lat"] + (dest["lat"] - origin["lat"]) * position
     pt_lng = origin["lng"] + (dest["lng"] - origin["lng"]) * position
@@ -330,6 +341,7 @@ def _compute_via_point(origin: dict, dest: dict, position: float, offset_km: flo
     lat_mid = (origin["lat"] + dest["lat"]) / 2.0
     cos_lat = math.cos(math.radians(lat_mid))
 
+    # Work in km-equivalent units so the direction vector is metrically correct
     dlat_km = (dest["lat"] - origin["lat"]) * 111.0
     dlng_km = (dest["lng"] - origin["lng"]) * 111.0 * cos_lat
     length   = math.sqrt(dlat_km ** 2 + dlng_km ** 2)
@@ -338,10 +350,12 @@ def _compute_via_point(origin: dict, dest: dict, position: float, offset_km: flo
 
     dlat_n = dlat_km / length
     dlng_n = dlng_km / length
+    # Right-perpendicular in metric space (90° clockwise: (x,y) → (y,-x))
     perp_lat_n =  dlng_n
     perp_lng_n = -dlat_n
 
     sign = 1 if offset_km >= 0 else -1
+    # Convert metric unit-vector back to degree offsets
     lat_shift = perp_lat_n * abs(offset_km) / 111.0
     lng_shift = perp_lng_n * abs(offset_km) / (111.0 * cos_lat) if cos_lat > 0 else 0.0
     return {
@@ -353,38 +367,40 @@ def _compute_via_point(origin: dict, dest: dict, position: float, offset_km: flo
 def _compute_three_via_points(origin: dict, dest: dict) -> tuple:
     """
     Return three via-points that force genuinely different road corridors.
-    Always generates both left AND right so coastal routes don't put all
-    three via-points in the ocean on one side.
+
+    For a Delhi→Mumbai-style SW route:
+      via_a — midpoint, pushed LEFT  (west corridor, e.g. Gujarat coast)
+      via_b — midpoint, pushed RIGHT (east corridor, e.g. Nagpur/Deccan)
+      via_c — 35% along route, pushed RIGHT further (forces divergence early)
+    All offsets are capped so the via-point stays inside India / reachable road network.
     """
     route_dist_km = _haversine_km(origin["lat"], origin["lng"], dest["lat"], dest["lng"])
-    base_offset   = max(130, min(300, route_dist_km * 0.25))
+    base_offset   = max(100, min(250, route_dist_km * 0.18))
 
     via_a = _compute_via_point(origin, dest, 0.50, -base_offset)           # left mid
-    via_b = _compute_via_point(origin, dest, 0.50,  base_offset)           # right mid (symmetric)
-    via_c = _compute_via_point(origin, dest, 0.30, -base_offset * 1.30)    # left, earlier diverge
+    via_b = _compute_via_point(origin, dest, 0.50,  base_offset * 1.10)    # right mid
+    via_c = _compute_via_point(origin, dest, 0.35,  base_offset * 1.40)    # right, earlier
     return via_a, via_b, via_c
 
 
 async def get_route_alternatives(
     origin_coords: dict,
     dest_coords: dict,
-    mandatory_stops: list[dict] = None,
 ) -> list[dict]:
     """
     Returns up to 3 alternative route corridors using route_adv (traffic-accurate).
-    mandatory_stops: remaining pickup/delivery stops that must be visited in every alternative.
+    Via-points are computed geometrically — no hardcoded city names.
+    The direct O→D route is intentionally excluded (it equals the current route).
     """
-    mandatory_stops = mandatory_stops or []
+    import asyncio
+
     via_a, via_b, via_c = _compute_three_via_points(origin_coords, dest_coords)
     token = await get_token()
 
     async def _fetch_via(via: dict) -> dict | Exception:
-        # mandatory stops first, then the corridor deviation point
-        middle = mandatory_stops + [via]
-        middle_str = ";".join(f"{v['lng']},{v['lat']}" for v in middle)
         coords_str = (
             f"{origin_coords['lng']},{origin_coords['lat']};"
-            f"{middle_str};"
+            f"{via['lng']},{via['lat']};"
             f"{dest_coords['lng']},{dest_coords['lat']}"
         )
         params = {"traffic": "true", "geometries": "polyline", "overview": "full", "steps": "false"}
@@ -416,8 +432,8 @@ async def get_route_alternatives(
         if dur_with > 0 and dur_with == dur_no_tr:
             import random
             dur_with = int(dur_with * random.uniform(1.05, 1.45))
-
-        coords = _decode_polyline(r.get("geometry", ""))
+            
+        coords    = _decode_polyline(r.get("geometry", ""))
         return {
             "waypoints":                   _extract_waypoints_every_50km(coords),
             "geometry_encoded":            r.get("geometry", ""),
@@ -439,46 +455,14 @@ async def get_route_alternatives(
     if failed:
         logger.warning(f"{failed}/3 corridor route(s) failed, got {len(valid)} valid")
 
-    if len(valid) > 0:
-        logger.info(f"Alternatives: {len(valid)}/3 corridors computed")
-        return valid
+        return RuntimeError(f"Only {len(valid)}/3 corridor routes succeeded — Mappls API limits? Using fallback.")
 
-    # All corridors failed — fall back to a direct Mappls route call (real geometry)
-    logger.warning("All corridor alternatives failed — fetching direct route as fallback")
-    try:
-        direct_middle = mandatory_stops
-        direct_str = (
-            f"{origin_coords['lng']},{origin_coords['lat']};"
-            + (";".join(f"{v['lng']},{v['lat']}" for v in direct_middle) + ";" if direct_middle else "")
-            + f"{dest_coords['lng']},{dest_coords['lat']}"
-        )
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.get(
-                f"https://apis.mappls.com/advancedmaps/v1/{token}/route_adv/driving/{direct_str}",
-                params={"traffic": "true", "geometries": "polyline", "overview": "full", "steps": "false"},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        routes = data.get("routes", [])
-        if routes:
-            r = routes[0]
-            dur = int(r.get("duration", 0)) or 1
-            dist = r.get("distance", 0)
-            dur_ntr = int(r.get("duration_without_traffic", dur))
-            coords = _decode_polyline(r.get("geometry", ""))
-            return [{
-                "waypoints":                   _extract_waypoints_every_50km(coords),
-                "geometry_encoded":            r.get("geometry", ""),
-                "distance_km":                 round(dist / 1000, 2),
-                "duration_seconds":            dur,
-                "duration_no_traffic_seconds": dur_ntr,
-                "traffic_ratio":               round(dur / dur_ntr, 3) if dur_ntr > 0 else 1.0,
-                "eta_hours":                   round(dur / 3600, 2),
-            }]
-    except Exception as e:
-        logger.error(f"Direct route fallback also failed: {e}")
+    if len(valid) == 0:
+        logger.error("All alternatives failed. Mocking one fallback alternative.")
+        return [_get_fallback_route(origin_coords, dest_coords)]
 
-    return [_get_fallback_route(origin_coords, dest_coords)]
+    logger.info(f"Alternatives: {len(valid)}/3 corridors computed for {origin_coords} → {dest_coords}")
+    return valid
 
 
 async def get_route_through(
@@ -488,7 +472,9 @@ async def get_route_through(
 ) -> dict | None:
     """
     Fetch a single Mappls route that passes through one or more via-points.
-    Used by avoidance route logic in reroute_engine.
+    `via_coords` may be a single dict or a list of dicts (ordered waypoints).
+    Used by the avoidance route logic in reroute_engine.
+    Returns same dict shape as get_route_alternatives entries, or None on failure.
     """
     token = await get_token()
     vias = via_coords if isinstance(via_coords, list) else [via_coords]
@@ -516,9 +502,9 @@ async def get_route_through(
     if not routes:
         return _get_fallback_route(origin_coords, dest_coords)
 
-    r        = routes[0]
-    dur_with = int(r.get("duration", 0))
-    distance = r.get("distance", 0)
+    r         = routes[0]
+    dur_with  = int(r.get("duration", 0))
+    distance  = r.get("distance", 0)
 
     if dur_with == 0 or distance == 0:
         return _get_fallback_route(origin_coords, dest_coords)
@@ -527,8 +513,9 @@ async def get_route_through(
     if dur_with > 0 and dur_with == dur_no_tr:
         import random
         dur_with = int(dur_with * random.uniform(1.05, 1.45))
+        
+    coords    = _decode_polyline(r.get("geometry", ""))
 
-    coords = _decode_polyline(r.get("geometry", ""))
     return {
         "waypoints":                   _extract_waypoints_every_50km(coords),
         "geometry_encoded":            r.get("geometry", ""),
@@ -538,3 +525,24 @@ async def get_route_through(
         "traffic_ratio":               round(dur_with / dur_no_tr, 3) if dur_no_tr > 0 else 1.0,
         "eta_hours":                   round(dur_with / 3600, 2),
     }
+
+
+## testing this garbage if its any good or another loose
+
+if __name__ == "__main__":
+    import asyncio
+
+    async def test():
+        print("=== Routing (Surat → Kalol) ===")
+        origin = {"lat": 21.1702, "lng": 72.8311}
+        dest   = {"lat": 23.2452, "lng": 72.4966}
+
+        route = await get_route(origin, dest)
+
+        print(f"Distance      : {route['distance_km']} km")
+        print(f"ETA           : {route['eta_hours']} hours")
+        print(f"Traffic ratio : {route['traffic_ratio']}x")
+        print(f"Road names    : {route['road_names']}")
+        print(f"Waypoints     : {len(route['waypoints'])}")
+
+    asyncio.run(test())

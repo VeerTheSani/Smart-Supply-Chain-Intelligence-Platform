@@ -72,6 +72,7 @@ def _label_routes(routes: list) -> list:
     safest_r  = min(routes, key=lambda x: x["risk_score"])
     rec_r     = min(routes, key=lambda x: _recommended_score(x["risk_score"], x["extra_time_minutes"]))
 
+    # Copy each so overlapping winners don't overwrite each other's label
     fastest = {**fastest_r, "label": "Fastest",     "label_reason": "Shortest travel time"}
     safest  = {**safest_r,  "label": "Safest",      "label_reason": f"Lowest risk — {safest_r['risk_level']} ({safest_r['risk_score']:.0f}/100)"}
     recommended = {
@@ -83,38 +84,18 @@ def _label_routes(routes: list) -> list:
     result = []
     seen = set()
     for alt in [recommended, fastest, safest]:
-        # Tighter dedup buckets — only collapse truly identical routes
-        key = (round(alt["distance_km"] / 15) * 15, round(alt["duration_seconds"] / 600) * 600)
+        # Deduplicate by rounding distance to 30km and duration to 15min buckets
+        # Intentionally loose — only collapse truly identical routes, not similar corridors
+        key = (round(alt["distance_km"] / 30) * 30, round(alt["duration_seconds"] / 900) * 900)
         if key not in seen:
             seen.add(key)
             result.append(alt)
     return result
 
 
-def _remaining_stops(shipment: dict, current_location: dict) -> list[dict]:
-    """
-    Return via-point coords that are still AHEAD of current_location.
-    A stop is considered visited if the truck is already within 30 km of it.
-    """
-    via_points = shipment.get("via_points") or []
-    if not via_points:
-        return []
-    remaining = []
-    for vp in via_points:
-        coords = vp.get("coords")
-        if not coords:
-            continue
-        dist = _haversine_km(
-            current_location["lat"], current_location["lng"],
-            coords["lat"], coords["lng"],
-        )
-        if dist > 30:
-            remaining.append(coords)
-    return remaining
-
-
 # ── Incident-aware avoidance route ────────────────────────────────────────────
 
+# Incident types worth routing around, ranked by severity
 INCIDENT_PRIORITY = {
     "ROAD_CLOSED":          5,
     "FLOODING":             4,
@@ -127,6 +108,14 @@ INCIDENT_PRIORITY = {
 def _avoidance_via_points(incident: dict, origin: dict, dest: dict) -> list[dict]:
     """
     Compute TWO via-points that bracket the incident and route fully around it.
+
+    A single via-point only forces a detour to one intermediate location; Mappls
+    then finds the shortest path to the destination from there, which can snap back
+    onto the blocked road.  Two bracketing via-points — one before the closure and
+    one after — keep the bypass corridor intact through the entire closure zone.
+
+    Both points are pushed 90 km to the OPPOSITE side of the route from the incident
+    so Mappls cannot thread back through the closure between them.
     """
     from services.mappls_service import _compute_via_point
 
@@ -138,13 +127,17 @@ def _avoidance_via_points(incident: dict, origin: dict, dest: dict) -> list[dict
         mid = _compute_via_point(origin, dest, 0.5, 35)
         return [mid]
 
+    # Project incident onto the O→D straight line
     ilat     = incident["lat"] - origin["lat"]
     ilng     = incident["lng"] - origin["lng"]
     position = max(0.15, min(0.85, (ilat * dlat + ilng * dlng) / length_sq))
 
+    # Cross product: positive = incident is LEFT of O→D → push RIGHT (+), else push LEFT (-)
     cross     = dlat * ilng - dlng * ilat
     offset_km = 35 if cross > 0 else -35
 
+    # Two via-points that tightly bracket the incident (~30-40 km gap each side)
+    # Small spread + small offset = local detour onto a parallel road, not a cross-country loop
     spread = 0.05
     via_before = _compute_via_point(origin, dest, max(0.05, position - spread), offset_km)
     via_after  = _compute_via_point(origin, dest, min(0.95, position + spread), offset_km)
@@ -155,11 +148,16 @@ async def _fetch_avoidance_route(shipment: dict) -> dict | None:
     """
     Check stored incidents. If there's something severe enough to route around,
     compute an alternative that bypasses it.
+
+    Only triggers for ROAD_CLOSED, FLOODING, ACCIDENT, DANGEROUS_CONDITIONS.
+    Road works alone is not worth the detour.
+    Returns a scored route dict ready to append to alternatives, or None.
     """
     incidents = shipment.get("route_incidents", [])
     if not incidents:
         return None
 
+    # Only bother if there's something with priority >= 2 (DANGEROUS_CONDITIONS or worse)
     severe = [i for i in incidents if INCIDENT_PRIORITY.get(i.get("type", ""), 0) >= 2]
     if not severe:
         return None
@@ -171,9 +169,8 @@ async def _fetch_avoidance_route(shipment: dict) -> dict | None:
     if not origin or not dest:
         return None
 
-    remaining = _remaining_stops(shipment, origin)
     vias  = _avoidance_via_points(worst, origin, dest)
-    route = await get_route_through(origin, dest, remaining + vias)
+    route = await get_route_through(origin, dest, vias)
 
     if not route:
         logger.warning("Avoidance route fetch returned nothing — skipping")
@@ -206,7 +203,8 @@ async def _fetch_avoidance_route(shipment: dict) -> dict | None:
 async def get_gemini_avoidance_route(shipment: dict) -> dict | None:
     """
     If Gemini's road disturbance score flagged a safe_waypoint, geocode it
-    and fetch a real bypass route through that city.
+    and fetch a real bypass route: current_location → bypass_city → destination.
+    Returns a labeled route dict ready to append to alternatives, or None.
     """
     breakdown     = (shipment.get("last_risk_assessment") or {}).get("breakdown", {})
     safe_waypoint = breakdown.get("historical", {}).get("safe_waypoint", "")
@@ -226,9 +224,8 @@ async def get_gemini_avoidance_route(shipment: dict) -> dict | None:
         logger.warning(f"Could not geocode Gemini bypass city '{safe_waypoint}': {e}")
         return None
 
-    remaining = _remaining_stops(shipment, origin)
     via   = {"lat": bypass_coords["lat"], "lng": bypass_coords["lng"]}
-    route = await get_route_through(origin, dest, remaining + [via])
+    route = await get_route_through(origin, dest, [via])
     if not route:
         return None
 
@@ -259,7 +256,7 @@ async def get_gemini_avoidance_route(shipment: dict) -> dict | None:
 
 async def get_alternatives(shipment: dict) -> dict:
     """
-    Returns alternative routes using traffic ratio only — no weather API calls.
+    Returns 3 alternative routes using traffic ratio only — no weather API calls.
     Completes in ~3-5 seconds. Risk scores are traffic-based estimates only.
     """
     from core.scheduler import _advance_location
@@ -270,13 +267,13 @@ async def get_alternatives(shipment: dict) -> dict:
     if not current_location or not dest_coords:
         raise ValueError("Shipment missing location data")
 
-    remaining_stops = _remaining_stops(shipment, current_location)
-    logger.info(f"Fetching alternative routes (fast path) — {len(remaining_stops)} remaining stops...")
-    all_routes = await get_route_alternatives(current_location, dest_coords, remaining_stops)
+    logger.info("Fetching alternative routes (fast path, traffic only)...")
+    all_routes = await get_route_alternatives(current_location, dest_coords)
 
-    if len(all_routes) < 1:
-        raise ValueError("Could not compute any alternative routes for this path")
+    if len(all_routes) < 2:
+        raise ValueError("Could not compute at least 2 alternative routes for this path")
 
+    # Quick risk estimate from traffic ratio only — no weather API
     routes_scored = []
     for r in all_routes:
         traffic_ratio = r.get("traffic_ratio", 1.0)
@@ -294,10 +291,12 @@ async def get_alternatives(shipment: dict) -> dict:
 
     labeled = _label_routes(routes_scored)
 
+    # If incidents exist on current route, try to compute an avoidance alternative
     avoidance = await _fetch_avoidance_route(shipment)
     if avoidance:
         labeled.append(avoidance)
 
+    # Gemini road disturbance bypass (uses safe_waypoint from last risk assessment)
     gemini_route = await get_gemini_avoidance_route(shipment)
     if gemini_route:
         labeled.append(gemini_route)
@@ -323,9 +322,12 @@ async def get_alternatives(shipment: dict) -> dict:
 async def score_alternatives_risk(alternatives: list) -> list:
     """
     Full weather + traffic scoring for a list of alternatives.
+    Each alternative must have: waypoints, duration_seconds, distance_km, traffic_ratio.
+    Returns the same list with updated risk_score, risk_level, weather_score, reason.
     """
     async def _score_one(alt: dict) -> dict:
         waypoints     = alt.get("waypoints", [])
+        # Accept both canonical names and the UI aliases set by _transform_for_frontend
         eta_seconds   = alt.get("duration_seconds") or alt.get("eta") or 0
         distance_km   = alt.get("distance_km") or alt.get("distance") or 0
         traffic_ratio = alt.get("traffic_ratio", 1.0)
@@ -349,6 +351,7 @@ async def score_alternatives_risk(alternatives: list) -> list:
 
         return {
             **alt,
+            # Guarantee canonical names exist regardless of what came in
             "duration_seconds": eta_seconds,
             "distance_km":      distance_km,
             "risk_score":       combined,
