@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Polyline, Marker, useMap, CircleMarker, Toolti
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { X, ActivitySquare, Clock, Route, ShieldAlert,
-  Zap, Shield, Star, CloudRain, CheckCircle2, TrendingUp, MapPin, AlertTriangle, Navigation, RefreshCw
+  Zap, Shield, Star, CloudRain, CheckCircle2, TrendingUp, MapPin, AlertTriangle, Navigation, RefreshCw, Sparkles
 } from 'lucide-react';
 import { useRerouting, useScoreReroute, useApplyReroute } from '../../hooks/useShipments';
 import { useShipmentStore } from '../../stores/shipmentStore';
@@ -55,6 +55,16 @@ const ROUTE_META = {
     weight: 3,
     dash: '4 5',
     glow: '0 0 10px rgba(251,146,60,0.35)',
+  },
+  'Gemini Route': {
+    icon: Sparkles,
+    color: 'text-violet-400',
+    bg: 'bg-violet-500/10',
+    border: 'border-violet-500/30',
+    mapColor: '#a78bfa',
+    weight: 3,
+    dash: '7 4',
+    glow: '0 0 14px rgba(167,139,250,0.55)',
   },
 };
 
@@ -512,7 +522,7 @@ function RouteCard({ alt, isScoring, index, onHover, onApply, isApplying }) {
         </motion.div>
       )}
 
-      {!isRec && alt.is_avoidance && (
+      {!isRec && alt.is_avoidance && alt.label !== 'Gemini Route' && (
         <motion.div
           initial={{ opacity: 0, x: 5 }}
           animate={{ opacity: 1, x: 0 }}
@@ -520,6 +530,17 @@ function RouteCard({ alt, isScoring, index, onHover, onApply, isApplying }) {
           className="absolute top-2.5 right-3 text-[9px] font-black tracking-[0.12em] text-orange-400 uppercase flex items-center gap-1"
         >
           <AlertTriangle className="w-2.5 h-2.5" /> Avoids Closure
+        </motion.div>
+      )}
+
+      {alt.label === 'Gemini Route' && (
+        <motion.div
+          initial={{ opacity: 0, x: 5 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 0.3 }}
+          className="absolute top-2.5 right-3 text-[9px] font-black tracking-[0.12em] text-violet-400 uppercase flex items-center gap-1"
+        >
+          <Sparkles className="w-2.5 h-2.5" /> AI Bypass
         </motion.div>
       )}
 

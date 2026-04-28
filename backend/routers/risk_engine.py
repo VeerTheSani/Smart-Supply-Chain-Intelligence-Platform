@@ -227,9 +227,21 @@ async def _compute_historical_score(
     road_names: list[str],
     planned_date: str,
     risk_level: str,
+    origin: str = "",
+    destination: str = "",
+    via_point_names: list[str] = [],
 ) -> dict:
-    result = await get_road_disturbance_score(road_names, planned_date, risk_level)
-    return {"score": result["score"], "reason": result["reason"], "weight": WEIGHTS["historical"]}
+    result = await get_road_disturbance_score(
+        road_names, planned_date, risk_level,
+        origin=origin, destination=destination, via_points=via_point_names,
+    )
+    return {
+        "score":             result["score"],
+        "reason":            result["reason"],
+        "weight":            WEIGHTS["historical"],
+        "incident_location": result.get("incident_location", ""),
+        "safe_waypoint":     result.get("safe_waypoint", ""),
+    }
 
 
 #main masalaa , with protin tube with white soas
@@ -249,6 +261,9 @@ async def calculate_risk(shipment: dict) -> dict:
     road_names       = shipment.get("road_names", [])
     planned_date     = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     prev_risk_lvl    = (shipment.get("risk") or {}).get("current", {}).get("risk_level", "low")
+    origin_name      = shipment.get("origin_name") or shipment.get("origin_resolved", "")
+    destination_name = shipment.get("destination_name") or shipment.get("destination_resolved", "")
+    via_point_names  = [vp["location_name"] for vp in shipment.get("via_points", []) if vp.get("location_name")]
 
     logger.info(f"Calculating risk for shipment with {len(waypoints)} waypoints, {len(stored_incidents)} stored incidents")
 
@@ -256,7 +271,10 @@ async def calculate_risk(shipment: dict) -> dict:
     weather_data, traffic_data, historical_data = await asyncio.gather(
         _compute_weather_score(waypoints, current_location, origin_coords, eta_seconds, distance_km),
         _compute_traffic_score(current_location, dest_coords),
-        _compute_historical_score(road_names, planned_date, prev_risk_lvl),
+        _compute_historical_score(
+            road_names, planned_date, prev_risk_lvl,
+            origin=origin_name, destination=destination_name, via_point_names=via_point_names,
+        ),
     )
     event_data = _compute_event_score(stored_incidents)
 

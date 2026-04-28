@@ -8,7 +8,7 @@ const FACTOR_META = {
   traffic:     { label: 'Traffic',       icon: '🚗', color: 'from-orange-500 to-amber-400', barColor: 'bg-orange-500' },
   events:      { label: 'Events',        icon: '⚡', color: 'from-purple-500 to-violet-400', barColor: 'bg-purple-500' },
   time_buffer: { label: 'Time Buffer',   icon: '⏱️', color: 'from-teal-500 to-emerald-400', barColor: 'bg-teal-500' },
-  historical:  { label: 'Historical',    icon: '📊', color: 'from-slate-500 to-gray-400',   barColor: 'bg-slate-500' },
+  historical:  { label: 'Gemini AI Intel', icon: '🤖', color: 'from-violet-500 to-purple-400', barColor: 'bg-violet-500' },
 };
 
 const RISK_BADGE = {
@@ -144,6 +144,30 @@ const RiskBreakdown = memo(function RiskBreakdown({ riskAssessment }) {
                     <p className="text-[11px] text-theme-secondary mt-1.5 leading-relaxed">
                       {factor.reason || 'No data'}
                     </p>
+
+                    {/* Gemini Bypass Panel (Historical / AI Intel only) */}
+                    {factor.key === 'historical' && factor.safe_waypoint && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        transition={{ duration: 0.3, delay: 0.1 }}
+                        className="mt-2 pt-2 border-t border-violet-500/20 border-dashed overflow-hidden"
+                      >
+                        <p className="text-[9px] font-black text-violet-400 uppercase tracking-[0.15em] mb-1.5 flex items-center gap-1">
+                          🛣️ Gemini Bypass Recommended
+                        </p>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="px-2 py-0.5 rounded-full bg-violet-500/15 border border-violet-500/30 text-violet-300 text-[10px] font-black">
+                            Via {factor.safe_waypoint}
+                          </span>
+                          {factor.incident_location && (
+                            <span className="text-[10px] text-theme-secondary">
+                              · incident near <span className="text-theme-primary font-semibold">{factor.incident_location}</span>
+                            </span>
+                          )}
+                        </div>
+                      </motion.div>
+                    )}
 
                     {/* Point Results Visualizer (Weather Only) */}
                     {factor.key === 'weather' && factor.point_results && factor.point_results.length > 0 && (

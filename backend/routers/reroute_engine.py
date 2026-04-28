@@ -8,6 +8,7 @@ import math
 
 from services.mappls_service import get_route_alternatives, get_route_through
 from services.weather_service import score_weather_along_route
+from services.geocoding_service import geocode
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +198,60 @@ async def _fetch_avoidance_route(shipment: dict) -> dict | None:
     }
 
 
+# ── Gemini road disturbance bypass route ─────────────────────────────────────
+
+async def get_gemini_avoidance_route(shipment: dict) -> dict | None:
+    """
+    If Gemini's road disturbance score flagged a safe_waypoint, geocode it
+    and fetch a real bypass route: current_location → bypass_city → destination.
+    Returns a labeled route dict ready to append to alternatives, or None.
+    """
+    breakdown     = (shipment.get("last_risk_assessment") or {}).get("breakdown", {})
+    safe_waypoint = breakdown.get("historical", {}).get("safe_waypoint", "")
+    incident_loc  = breakdown.get("historical", {}).get("incident_location", "")
+
+    if not safe_waypoint:
+        return None
+
+    origin = shipment.get("current_location") or shipment.get("origin_coords")
+    dest   = shipment.get("destination_coords")
+    if not origin or not dest:
+        return None
+
+    try:
+        bypass_coords = await geocode(safe_waypoint)
+    except Exception as e:
+        logger.warning(f"Could not geocode Gemini bypass city '{safe_waypoint}': {e}")
+        return None
+
+    via   = {"lat": bypass_coords["lat"], "lng": bypass_coords["lng"]}
+    route = await get_route_through(origin, dest, [via])
+    if not route:
+        return None
+
+    traffic_ratio = route.get("traffic_ratio", 1.0)
+    risk_score    = round(float(_threshold(traffic_ratio, TRAFFIC_THRESHOLDS)), 1)
+    reason_parts  = [
+        f"Bypasses {incident_loc}" if incident_loc else "Gemini-suggested bypass",
+        f"via {safe_waypoint}",
+    ]
+
+    logger.info(f"Gemini avoidance route: bypass via {safe_waypoint} (incident: {incident_loc or 'unknown'})")
+
+    return {
+        **route,
+        "risk_score":    risk_score,
+        "risk_level":    _risk_level(risk_score).lower(),
+        "weather_score": None,
+        "traffic_score": risk_score,
+        "reason":        " — ".join(reason_parts),
+        "risk_assessed": False,
+        "label":         "Gemini Route",
+        "label_reason":  f"AI-suggested bypass via {safe_waypoint}",
+        "is_avoidance":  True,
+    }
+
+
 # ── Fast path ─────────────────────────────────────────────────────────────────
 
 async def get_alternatives(shipment: dict) -> dict:
@@ -240,6 +295,11 @@ async def get_alternatives(shipment: dict) -> dict:
     avoidance = await _fetch_avoidance_route(shipment)
     if avoidance:
         labeled.append(avoidance)
+
+    # Gemini road disturbance bypass (uses safe_waypoint from last risk assessment)
+    gemini_route = await get_gemini_avoidance_route(shipment)
+    if gemini_route:
+        labeled.append(gemini_route)
 
     return {
         "shipment_id":   str(shipment.get("_id", "")),

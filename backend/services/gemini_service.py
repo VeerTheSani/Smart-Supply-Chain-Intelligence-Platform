@@ -160,27 +160,31 @@ def _default_response(reason: str) -> dict:
 
 async def get_road_disturbance_score(
     road_names: list[str],
-    planned_date: str,          # "YYYY-MM-DD"
-    risk_level: str = "low",    # used only to pick cache TTL
+    planned_date: str,
+    risk_level: str = "low",
+    origin: str = "",
+    destination: str = "",
+    via_points: list[str] = [],
 ) -> dict:
     """
     Search for disturbances on specific highway numbers near a planned date.
-    Returns {"score": float 0-100, "reason": str}
-    Score guide: 0=clear, 20=minor works, 40=moderate, 60=significant, 80+=blocked
-    Falls back to {"score": 0, "reason": "unavailable"} on any error.
+    Returns {"score", "reason", "incident_location", "safe_waypoint"}
+    safe_waypoint is a bypass city name only when score >= 40, else empty string.
+    Falls back to {"score": 0, "reason": "unavailable", ...} on any error.
     """
     if not GEMINI_API_KEY:
         logger.error("GEMINI_API_KEY not set in .env")
-        return {"score": 0, "reason": "unavailable"}
+        return _disturbance_fallback("unavailable")
 
     if not road_names:
-        return {"score": 0, "reason": "No road names available"}
+        return _disturbance_fallback("No road names available")
 
     from services.cache import road_disturbance_cache
     import re as _re
 
     ttl       = 600 if risk_level in ("high", "critical") else 1800
-    cache_key = f"road_dist:{'|'.join(sorted(road_names))}:{planned_date}"
+    route_key = f"{origin}>{destination}"
+    cache_key = f"road_dist:{'|'.join(sorted(road_names))}:{planned_date}:{route_key}"
 
     cached = road_disturbance_cache.get(cache_key)
     if cached is not None:
@@ -188,12 +192,16 @@ async def get_road_disturbance_score(
         return cached
 
     roads_str = ", ".join(road_names)
+    stops_str = " → ".join(via_points) if via_points else ""
+    route_display = f"{origin} → {stops_str} → {destination}" if stops_str else f"{origin} → {destination}"
+
     prompt = f"""You are a road intelligence analyst for Indian logistics.
 
-Search for disturbances on these specific highways on or near {planned_date}:
-Roads: {roads_str}
+Route: {route_display}
+Highways: {roads_str}
+Travel date: {planned_date}
 
-Look for:
+Search for disturbances on these specific highways:
 - Road closures or construction blocks on these highway numbers
 - Flooding or landslides affecting these corridors
 - Protests, bandh, or strikes specifically on these roads
@@ -202,13 +210,17 @@ Look for:
 Respond ONLY with this exact JSON, nothing else:
 {{
   "score": <0-100, 0=no issues, 20=minor works, 40=moderate disruption, 60=significant, 80=major blockage>,
-  "reason": "<one concise sentence, or 'No road disturbances found' if clear>"
-}}"""
+  "reason": "<one concise sentence, or 'No road disturbances found' if clear>",
+  "incident_location": "<city or highway stretch where the problem is, empty string if none>",
+  "safe_waypoint": "<nearest real Indian city on a parallel corridor between {origin} and {destination} that avoids the incident, empty string if score < 40>"
+}}
+
+If score < 40, safe_waypoint and incident_location must be empty strings."""
 
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "tools": [{"google_search": {}}],
-        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 256},
+        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 512},
     }
 
     try:
@@ -230,7 +242,7 @@ Respond ONLY with this exact JSON, nothing else:
 
         if not text:
             logger.warning("Gemini road disturbance: empty response")
-            return {"score": 0, "reason": "unavailable"}
+            return _disturbance_fallback("unavailable")
 
         text = text.strip()
         if text.startswith("```"):
@@ -243,24 +255,38 @@ Respond ONLY with this exact JSON, nothing else:
         result = json.loads(text)
         result.setdefault("score", 0)
         result.setdefault("reason", "No road disturbances found")
+        result.setdefault("incident_location", "")
+        result.setdefault("safe_waypoint", "")
         result["score"] = float(max(0, min(100, result["score"])))
 
-        logger.info(f"Road disturbance: score={result['score']} | {result['reason'][:80]}")
+        # Guard: clear bypass fields if score is low (prevents hallucinated waypoints)
+        if result["score"] < 40:
+            result["safe_waypoint"]     = ""
+            result["incident_location"] = ""
+
+        logger.info(
+            f"Road disturbance: score={result['score']} | {result['reason'][:60]}"
+            + (f" | bypass via {result['safe_waypoint']}" if result["safe_waypoint"] else "")
+        )
         road_disturbance_cache.set(cache_key, result, ttl=ttl)
         return result
 
     except json.JSONDecodeError as e:
         logger.error(f"Road disturbance JSON parse error: {e} | text: {text[:200]}")
-        return {"score": 0, "reason": "unavailable"}
+        return _disturbance_fallback("unavailable")
     except httpx.TimeoutException:
         logger.error("Road disturbance Gemini request timed out")
-        return {"score": 0, "reason": "unavailable"}
+        return _disturbance_fallback("unavailable")
     except httpx.HTTPError as e:
         logger.error(f"Road disturbance Gemini HTTP error: {e}")
-        return {"score": 0, "reason": "unavailable"}
+        return _disturbance_fallback("unavailable")
     except Exception as e:
         logger.error(f"Road disturbance unexpected error: {e}")
-        return {"score": 0, "reason": "unavailable"}
+        return _disturbance_fallback("unavailable")
+
+
+def _disturbance_fallback(reason: str) -> dict:
+    return {"score": 0, "reason": reason, "incident_location": "", "safe_waypoint": ""}
 
 
 # ── Self test ──────────────────────────────────────────────────────────────────
