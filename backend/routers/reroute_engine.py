@@ -8,7 +8,7 @@ import math
 
 from services.mappls_service import get_route_alternatives, get_route_through
 from services.weather_service import score_weather_along_route
-from services.geocoding_service import geocode
+from services.mappls_service import geocode
 
 logger = logging.getLogger(__name__)
 

@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 CLIENT_ID     = os.getenv("MAPPLS_CLIENT_ID")
 CLIENT_SECRET = os.getenv("MAPPLS_CLIENT_SECRET")
+TOMTOM_KEY    = os.getenv("TOMTOM_KEY")
 
 WAYPOINT_INTERVAL_KM = 50
 
@@ -153,6 +154,31 @@ async def geocode(place_name: str) -> dict:
     except Exception as e:
         logger.error(f"Mappls geocoding failed for '{place_name}': {e}. Using fallback.")
         return {"lat": 28.6139, "lng": 77.2090, "display_name": f"{place_name} (Fallback)"}
+
+
+async def reverse_geocode(lat: float, lng: float) -> str:
+    """Return a short place name for coordinates using TomTom reverse geocoding."""
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as client:
+            resp = await client.get(
+                f"https://api.tomtom.com/search/2/reverseGeocode/{lat},{lng}.json",
+                params={"key": TOMTOM_KEY, "radius": 10000}
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        addresses = data.get("addresses", [])
+        if not addresses:
+            return f"{lat:.2f},{lng:.2f}"
+        addr = addresses[0].get("address", {})
+        return (
+            addr.get("municipality")
+            or addr.get("municipalitySubdivision")
+            or addr.get("countrySecondarySubdivision")
+            or addr.get("countrySubdivision")
+            or f"{lat:.2f},{lng:.2f}"
+        )
+    except Exception:
+        return f"{lat:.2f},{lng:.2f}"
 
 
 # ── Routing + Traffic ──────────────────────────────────────────────────────────

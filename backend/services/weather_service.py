@@ -7,7 +7,7 @@ import asyncio
 import httpx
 import logging
 from datetime import datetime, timezone, timedelta
-from services.geocoding_service import reverse_geocode
+from services.mappls_service import reverse_geocode
 
 logger = logging.getLogger(__name__)
 
