@@ -104,12 +104,12 @@ const NotificationPanel = memo(function NotificationPanel({ isOpen }) {
             </div>
             <div>
               <h3 className="font-bold text-theme-primary dark:text-slate-100 text-sm tracking-tight">
-                Control Tower
+                {showSettings ? 'Audit Preferences' : 'Control Tower'}
               </h3>
               <div className="flex items-center gap-2 mt-0.5">
                 <span className="flex items-center gap-1 text-[9px] font-black text-emerald-500 uppercase tracking-widest">
                   <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
-                  Live Audit
+                  {showSettings ? 'Configuration' : 'Live Audit'}
                 </span>
                 <span className="text-theme-secondary dark:text-slate-600 text-[9px] uppercase tracking-widest">• Intelligence v3.4</span>
               </div>
@@ -140,42 +140,44 @@ const NotificationPanel = memo(function NotificationPanel({ isOpen }) {
         </div>
 
         {/* ========== SEARCH & TABS ========== */}
-        <div className="space-y-3">
-          <div className="relative group">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-theme-secondary dark:text-slate-500 group-focus-within:text-accent transition-colors" />
-            <input
-              type="text"
-              placeholder="Search shipment logs..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 text-xs bg-white border border-gray-200 rounded-xl text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent/30 transition-all"
-            />
-          </div>
+        {!showSettings && (
+          <div className="space-y-3">
+            <div className="relative group">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-theme-secondary dark:text-slate-500 group-focus-within:text-accent transition-colors" />
+              <input
+                type="text"
+                placeholder="Search shipment logs..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 text-xs bg-white border border-gray-200 rounded-xl text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent/30 transition-all"
+              />
+            </div>
 
-          <div className="flex p-1 bg-theme-tertiary dark:bg-slate-900/40 rounded-xl border border-theme dark:border-slate-800/50">
-            {[
-              { key: 'active', label: 'Active', count: stats.unread },
-              { key: 'flagged', label: 'Flagged', count: stats.flagged },
-              { key: 'history', label: 'History' },
-            ].map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
-                className={cn(
-                  "flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
-                  activeTab === tab.key
-                    ? "bg-white hover:bg-gray-100 text-accent shadow-sm border border-theme dark:border-slate-700"
-                    : "text-theme-secondary dark:text-slate-500 hover:text-theme-primary"
-                )}
-              >
-                {tab.label}
-                {tab.count > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-full bg-accent text-white text-[8px] font-black">{tab.count}</span>
-                )}
-              </button>
-            ))}
+            <div className="flex p-1 bg-theme-tertiary dark:bg-slate-900/40 rounded-xl border border-theme dark:border-slate-800/50">
+              {[
+                { key: 'active', label: 'Active', count: stats.unread },
+                { key: 'flagged', label: 'Flagged', count: stats.flagged },
+                { key: 'history', label: 'History' },
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key)}
+                  className={cn(
+                    "flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                    activeTab === tab.key
+                      ? "bg-white hover:bg-gray-100 text-accent shadow-sm border border-theme dark:border-slate-700"
+                      : "text-theme-secondary dark:text-slate-500 hover:text-theme-primary"
+                  )}
+                >
+                  {tab.label}
+                  {tab.count > 0 && (
+                    <span className="px-1.5 py-0.5 rounded-full bg-accent text-white text-[8px] font-black">{tab.count}</span>
+                  )}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* ========== CONTENT ========== */}
@@ -189,7 +191,9 @@ const NotificationPanel = memo(function NotificationPanel({ isOpen }) {
             transition={{ duration: 0.15 }}
             className="divide-y divide-theme/50 dark:divide-slate-800/50"
           >
-            {currentList.length > 0 ? (
+            {showSettings ? (
+              <SettingsView prefs={prefs} />
+            ) : currentList.length > 0 ? (
               currentList.map((alert) => (
                 <AlertItem
                   key={alert.id}
@@ -247,6 +251,121 @@ const NotificationPanel = memo(function NotificationPanel({ isOpen }) {
     </motion.div>
   );
 });
+
+function SettingsView({ prefs }) {
+  return (
+    <div className="p-6 space-y-8 bg-white text-gray-900">
+      <div>
+        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-accent mb-4">Audio Feedback</h4>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-theme-tertiary text-theme-primary">
+                {prefs.soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+              </div>
+              <div>
+                <p className="text-xs font-bold text-theme-primary">Alert Sounds</p>
+                <p className="text-[10px] text-theme-secondary">Play audio for new critical events</p>
+              </div>
+            </div>
+            <button
+              onClick={() => prefs.setSoundEnabled(!prefs.soundEnabled)}
+              className={cn(
+                "w-10 h-5 rounded-full transition-all relative border",
+                prefs.soundEnabled ? "bg-accent border-accent" : "bg-theme-tertiary border-theme"
+              )}
+            >
+              <div className={cn(
+                "absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-all shadow-sm",
+                prefs.soundEnabled ? "left-[22px]" : "left-0.5"
+              )} />
+            </button>
+          </div>
+
+          {prefs.soundEnabled && (
+            <div className="space-y-2 pl-11">
+              <div className="flex justify-between text-[9px] font-bold text-theme-secondary uppercase tracking-widest">
+                <span>Volume</span>
+                <span>{Math.round(prefs.soundVolume * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.1"
+                value={prefs.soundVolume}
+                onChange={(e) => prefs.setSoundVolume(parseFloat(e.target.value))}
+                className="w-full accent-accent h-1.5 bg-theme-tertiary rounded-lg appearance-none"
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div>
+        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-accent mb-4">Visual Alerts</h4>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-theme-tertiary text-theme-primary">
+                <Monitor className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-theme-primary">Desktop Notifications</p>
+                <p className="text-[10px] text-theme-secondary">Show browser popups when minimized</p>
+              </div>
+            </div>
+            <button
+              onClick={() => prefs.setDesktopEnabled(!prefs.desktopEnabled)}
+              className={cn(
+                "w-10 h-5 rounded-full transition-all relative border",
+                prefs.desktopEnabled ? "bg-accent border-accent" : "bg-theme-tertiary border-theme"
+              )}
+            >
+              <div className={cn(
+                "absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-all shadow-sm",
+                prefs.desktopEnabled ? "left-[22px]" : "left-0.5"
+              )} />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-theme-tertiary text-theme-primary">
+                <Bell className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-theme-primary">Toast Popups</p>
+                <p className="text-[10px] text-theme-secondary">Show in-app overlay alerts</p>
+              </div>
+            </div>
+            <button
+              onClick={() => prefs.setToastsEnabled(!prefs.toastsEnabled)}
+              className={cn(
+                "w-10 h-5 rounded-full transition-all relative border",
+                prefs.toastsEnabled ? "bg-accent border-accent" : "bg-theme-tertiary border-theme"
+              )}
+            >
+              <div className={cn(
+                "absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-all shadow-sm",
+                prefs.toastsEnabled ? "left-[22px]" : "left-0.5"
+              )} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="pt-4 border-t border-theme">
+        <button
+          onClick={prefs.resetPrefs}
+          className="w-full py-2.5 rounded-xl border border-dashed border-theme hover:border-danger/30 hover:bg-danger/5 text-[10px] font-bold text-theme-secondary hover:text-danger uppercase tracking-widest transition-all"
+        >
+          Reset to Factory Defaults
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function EmptyState({ icon, title, description }) {
   return (
