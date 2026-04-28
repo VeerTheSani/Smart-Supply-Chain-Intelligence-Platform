@@ -1,6 +1,6 @@
 import { memo, useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Package, ShieldAlert, Navigation, Search, Filter, Plus, Pencil, Trash2, X, ChevronDown, Eye } from 'lucide-react';
+import { Package, ShieldAlert, Navigation, Search, Filter, Plus, Pencil, Trash2, X, ChevronDown, Eye, Loader2 } from 'lucide-react';
 import { AreaChart, Area, ResponsiveContainer, YAxis } from 'recharts';
 import { useShipments, useDeleteShipment } from '../hooks/useShipments';
 import { useShipmentStore } from '../stores/shipmentStore';
@@ -382,28 +382,37 @@ const Shipments = memo(function Shipments() {
 
                       <td className="py-4 px-6 text-center">
                         <div className="flex flex-col items-center justify-center gap-2">
-                          <div className={cn(
-                            'inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold',
-                            riskBadgeClass(riskLevel)
-                          )}>
-                            <ShieldAlert className="w-3.5 h-3.5" />
-                            {riskScore.toFixed(0)} ({riskLevel})
-                          </div>
-                          {shipment.risk?.history?.length > 1 && (
-                            <div className="h-8 w-24 mx-auto hover:opacity-100 transition-opacity">
-                              <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart data={shipment.risk.history.map((h, i) => ({ val: h.risk_score, idx: i }))}>
-                                   <defs>
-                                     <linearGradient id={`colorRisk-${shipment.id}`} x1="0" y1="0" x2="0" y2="1">
-                                       <stop offset="5%" stopColor={isCritical ? "#ef4444" : isWarning ? "#eab308" : "#10b981"} stopOpacity={0.3}/>
-                                       <stop offset="95%" stopColor={isCritical ? "#ef4444" : isWarning ? "#eab308" : "#10b981"} stopOpacity={0}/>
-                                     </linearGradient>
-                                   </defs>
-                                   <YAxis domain={[0, 100]} hide />
-                                   <Area type="monotone" dataKey="val" stroke={isCritical ? "#ef4444" : isWarning ? "#eab308" : "#10b981"} fill={`url(#colorRisk-${shipment.id})`} strokeWidth={2} isAnimationActive={false} />
-                                </AreaChart>
-                              </ResponsiveContainer>
+                          {shipment.risk?.current?.reason === 'Initial assessment pending' ? (
+                            <div className="inline-flex items-center justify-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold bg-theme-tertiary text-theme-secondary border border-theme/50 shadow-sm">
+                              <Loader2 className="w-3.5 h-3.5 text-accent animate-spin" />
+                              <span className="tracking-wide">ANALYZING</span>
                             </div>
+                          ) : (
+                            <>
+                              <div className={cn(
+                                'inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold',
+                                riskBadgeClass(riskLevel)
+                              )}>
+                                <ShieldAlert className="w-3.5 h-3.5" />
+                                {riskScore.toFixed(0)} ({riskLevel})
+                              </div>
+                              {shipment.risk?.history?.length > 1 && (
+                                <div className="h-8 w-24 mx-auto hover:opacity-100 transition-opacity">
+                                  <ResponsiveContainer width="100%" height="100%">
+                                    <AreaChart data={shipment.risk.history.map((h, i) => ({ val: h.risk_score, idx: i }))}>
+                                       <defs>
+                                         <linearGradient id={`colorRisk-${shipment.id}`} x1="0" y1="0" x2="0" y2="1">
+                                           <stop offset="5%" stopColor={isCritical ? "#ef4444" : isWarning ? "#eab308" : "#10b981"} stopOpacity={0.3}/>
+                                            <stop offset="95%" stopColor={isCritical ? "#ef4444" : isWarning ? "#eab308" : "#10b981"} stopOpacity={0}/>
+                                         </linearGradient>
+                                       </defs>
+                                       <YAxis domain={[0, 100]} hide />
+                                       <Area type="monotone" dataKey="val" stroke={isCritical ? "#ef4444" : isWarning ? "#eab308" : "#10b981"} fill={`url(#colorRisk-${shipment.id})`} strokeWidth={2} isAnimationActive={false} />
+                                    </AreaChart>
+                                  </ResponsiveContainer>
+                                </div>
+                              )}
+                            </>
                           )}
                         </div>
                       </td>

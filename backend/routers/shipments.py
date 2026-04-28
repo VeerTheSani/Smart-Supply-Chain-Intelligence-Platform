@@ -7,7 +7,7 @@ from typing import Optional
 
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 
 from database import db
 from models import ShipmentCreate, ShipmentUpdate
@@ -111,11 +111,22 @@ async def _initial_risk_assessment(shipment_id, doc: dict):
     except Exception as e:
         logger.error(f"Initial risk assessment failed for {shipment_id}: {e}")
 
+async def _background_assessment_task(shipment_id_str: str):
+    from routers.incidents import fetch_and_store_incidents
+    try:
+        await fetch_and_store_incidents(shipment_id_str)
+        doc = await db.shipments.find_one({"_id": _to_id(shipment_id_str)})
+        if doc:
+            await _initial_risk_assessment(_to_id(shipment_id_str), doc)
+    except Exception as e:
+        logger.error(f"Background assessment failed for {shipment_id_str}: {e}")
+
+
 
 # ── POST /api/shipments ────────────────────────────────────────────────────────
 
 @router.post("", status_code=201)
-async def create_shipment(data: ShipmentCreate):
+async def create_shipment(data: ShipmentCreate, background_tasks: BackgroundTasks):
     """
     Create a new shipment:
     1. Geocode origin + destination (Nominatim)
@@ -222,19 +233,12 @@ async def create_shipment(data: ShipmentCreate):
     }
 
     result = await db.shipments.insert_one(doc)
-    # Fetch incidents + assess risk synchronously to apply backpressure against rapid API limit testing
-    # and to ensure the initial risk score cleanly includes the fetched incidents before frontend load.
-    from routers.incidents import fetch_and_store_incidents
-    await fetch_and_store_incidents(result.inserted_id)
     
-    updated_doc = await db.shipments.find_one({"_id": result.inserted_id})
-    if updated_doc:
-        await _initial_risk_assessment(result.inserted_id, updated_doc)
-        # Fetch one last time to get the appended risk assessment for the frontend serialize
-        updated_doc = await db.shipments.find_one({"_id": result.inserted_id})
+    # Enqueue risk assessment and incident fetching to the background so the UI doesn't block waiting for Gemini API.
+    background_tasks.add_task(_background_assessment_task, str(result.inserted_id))
 
-    logger.info(f"Shipment created: {result.inserted_id} | {data.origin_name} → {data.destination_name} | {tracking_number}")
-    return _serialize(updated_doc or doc)
+    logger.info(f"Shipment created (background assessment enqueued): {result.inserted_id} | {data.origin_name} → {data.destination_name} | {tracking_number}")
+    return _serialize(doc)
 
 
 # ── GET /api/shipments ─────────────────────────────────────────────────────────

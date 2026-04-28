@@ -1,6 +1,7 @@
 import { memo, useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertTriangle, X, WifiOff, MapPin, Info } from 'lucide-react';
+import GeminiLogo from './GeminiLogo';
 import { useAlertStore } from '../../stores/alertStore';
 import { useUIStore } from '../../stores/uiStore';
 import { useQueryClient } from '@tanstack/react-query';
@@ -103,10 +104,10 @@ const LiveAlertItem = memo(function LiveAlertItem({ alert, onDismiss }) {
       return (
         <>
           <div className="flex items-center justify-between mb-2">
-            <span className={`text-[10px] font-semibold uppercase ${
+            <span className={`flex items-center gap-1 text-[10px] font-semibold uppercase ${
               isGemini ? 'text-violet-400' : alert.badge === 'REAL' ? 'text-red-400' : 'text-blue-400'
             }`}>
-              {isGemini ? '🤖 AI ROAD INTEL' : alert.badge === 'REAL' ? 'REAL SYSTEM' : 'SCENARIO LAB'}
+              {isGemini ? <><GeminiLogo size={13} /> AI ROAD INTEL</> : alert.badge === 'REAL' ? 'REAL SYSTEM' : 'SCENARIO LAB'}
             </span>
             <button
               onClick={(e) => { e.stopPropagation(); onDismiss(alert.id); }}
@@ -118,8 +119,8 @@ const LiveAlertItem = memo(function LiveAlertItem({ alert, onDismiss }) {
 
           {/* MAIN CONTENT */}
           <div className="flex items-start gap-2 text-xs text-gray-300">
-            <span className={isGemini ? 'text-violet-400 mt-0.5' : 'text-yellow-400 mt-0.5'}>
-              {isGemini ? '🤖' : '⚠️'}
+            <span className="mt-0.5 shrink-0">
+              {isGemini ? <GeminiLogo size={14} /> : <span className="text-yellow-400">⚠️</span>}
             </span>
             <span className="line-clamp-2 leading-relaxed">
               {alert.message || 'Alert detected'}

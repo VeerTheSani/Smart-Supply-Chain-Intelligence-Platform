@@ -2,13 +2,14 @@ import { memo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, ChevronUp, ShieldAlert, Activity, Zap } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import GeminiLogo from './GeminiLogo';
 
 const FACTOR_META = {
   weather:     { label: 'Weather',       icon: '🌦️', color: 'from-blue-500 to-cyan-400',   barColor: 'bg-blue-500' },
   traffic:     { label: 'Traffic',       icon: '🚗', color: 'from-orange-500 to-amber-400', barColor: 'bg-orange-500' },
   events:      { label: 'Events',        icon: '⚡', color: 'from-purple-500 to-violet-400', barColor: 'bg-purple-500' },
   time_buffer: { label: 'Time Buffer',   icon: '⏱️', color: 'from-teal-500 to-emerald-400', barColor: 'bg-teal-500' },
-  historical:  { label: 'Gemini AI Intel', icon: '🤖', color: 'from-violet-500 to-purple-400', barColor: 'bg-violet-500' },
+  historical:  { label: 'Gemini AI Intel', icon: null,  color: 'from-violet-500 to-purple-400', barColor: 'bg-violet-500' },
 };
 
 const RISK_BADGE = {
@@ -110,7 +111,11 @@ const RiskBreakdown = memo(function RiskBreakdown({ riskAssessment }) {
                   >
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
-                        <span className="text-base">{factor.meta.icon}</span>
+                        <span className="text-base flex items-center">
+                          {factor.key === 'historical'
+                            ? <GeminiLogo size={18} />
+                            : factor.meta.icon}
+                        </span>
                         <span className="text-[11px] font-black text-theme-primary uppercase tracking-[0.15em]">
                           {factor.meta.label}
                         </span>

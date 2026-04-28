@@ -216,17 +216,33 @@ async def get_route(
 
     traffic_ratio    = round(duration_with / duration_no_traffic, 3) if duration_no_traffic > 0 else 1.0
 
-    # Extract highway codes from steps — NH48, SH17, MDR3 only (no freetext names)
-    _HIGHWAY_RE = re.compile(r'\b(NH|SH|MDR)\s*(\d+[A-Z]?)\b')
+    # Extract highway codes and major road names
+    _HIGHWAY_RE = re.compile(r'\b(NH|SH|MDR|NE|AH|National\s+Highway|State\s+Highway)[-\s]*(\d+[A-Z]?)\b', re.IGNORECASE)
+    _NAMED_RE = re.compile(r'\b([A-Za-z\s]+(?:Expressway|Highway|Ring\s+Road|Corridor))\b', re.IGNORECASE)
     steps = legs[0].get("steps", []) if legs else []
     seen_codes: set[str] = set()
     road_names: list[str] = []
+    
     for step in steps:
-        for m in _HIGHWAY_RE.finditer(step.get("name", "")):
-            code = f"{m.group(1)}{m.group(2)}"   # e.g. "NH48", "SH17"
+        name = step.get("name", "")
+        for m in _HIGHWAY_RE.finditer(name):
+            prefix = m.group(1).upper()
+            if "NATIONAL" in prefix: prefix = "NH"
+            elif "STATE" in prefix: prefix = "SH"
+            code = f"{prefix}{m.group(2).upper()}"
             if code not in seen_codes:
                 road_names.append(code)
                 seen_codes.add(code)
+        
+        for m in _NAMED_RE.finditer(name):
+            val = m.group(1).title().strip()
+            if val not in seen_codes and len(val) > 8:
+                road_names.append(val)
+                seen_codes.add(val)
+    
+    if not road_names:
+        road_names = ["Main Intercity Route"]
+
 
     # Decode geometry to get waypoints
     coordinates = _decode_polyline(primary.get("geometry", ""))
