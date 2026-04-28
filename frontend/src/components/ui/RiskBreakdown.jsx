@@ -126,29 +126,50 @@ const RiskBreakdown = memo(function RiskBreakdown({ riskAssessment }) {
                         )}
                       </div>
                       <div className="text-right">
-                        <span className="text-xs font-mono text-theme-secondary">
-                          {factor.score} × {factor.weight} = 
-                        </span>
-                        <span className="text-xs font-mono font-bold text-theme-primary ml-1">
-                          {factor.contribution.toFixed(1)}
-                        </span>
+                        {factor.reason === 'AI Intel is currently analyzing...' ? (
+                          <span className="text-xs font-mono font-bold text-violet-400/60 animate-pulse">
+                            COMPUTING...
+                          </span>
+                        ) : (
+                          <>
+                            <span className="text-xs font-mono text-theme-secondary">
+                              {factor.score} × {factor.weight} = 
+                            </span>
+                            <span className="text-xs font-mono font-bold text-theme-primary ml-1">
+                              {factor.contribution.toFixed(1)}
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
 
                     {/* Progress bar */}
                     <div className="h-1.5 w-full bg-theme-tertiary rounded-full overflow-hidden">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${barWidth}%` }}
-                        transition={{ duration: 0.5, delay: i * 0.05, ease: 'easeOut' }}
-                        className={cn('h-full rounded-full', factor.meta.barColor)}
-                      />
+                      {factor.reason === 'AI Intel is currently analyzing...' ? (
+                         <div className="h-full w-full bg-violet-500/20 overflow-hidden relative">
+                           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-violet-500/40 to-transparent -translate-x-full animate-[shimmer_1.5s_infinite]" />
+                         </div>
+                      ) : (
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: `${barWidth}%` }}
+                          transition={{ duration: 0.5, delay: i * 0.05, ease: 'easeOut' }}
+                          className={cn('h-full rounded-full', factor.meta.barColor)}
+                        />
+                      )}
                     </div>
 
                     {/* Reason */}
-                    <p className="text-[11px] text-theme-secondary mt-1.5 leading-relaxed">
-                      {factor.reason || 'No data'}
-                    </p>
+                    {factor.reason === 'AI Intel is currently analyzing...' ? (
+                      <div className="flex items-center gap-2 mt-2">
+                        <div className="w-3.5 h-3.5 border-2 border-violet-500/30 border-t-violet-500 rounded-full animate-spin shrink-0" />
+                        <p className="text-[11px] text-violet-400/80 animate-pulse font-medium">{factor.reason}</p>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-theme-secondary mt-1.5 leading-relaxed">
+                        {factor.reason || 'No data'}
+                      </p>
+                    )}
 
                     {/* Gemini Bypass Panel (Historical / AI Intel only) */}
                     {factor.key === 'historical' && factor.safe_waypoint && (

@@ -82,20 +82,11 @@ def _advance_location(shipment: dict) -> dict | None:
     
 
 def _should_call_gemini(shipment: dict, current_risk_level: str) -> bool:
-  
-    last_check = shipment.get("last_gemini_check")
-    if not last_check:
-        return True
-
-    if isinstance(last_check, str):
-        last_check = datetime.fromisoformat(last_check)
-    if last_check.tzinfo is None:
-        last_check = last_check.replace(tzinfo=timezone.utc)
-
-    ttl     = GEMINI_TTL.get(current_risk_level, GEMINI_TTL["UNKNOWN"])
-    elapsed = (datetime.now(timezone.utc) - last_check).total_seconds()
-
-    return elapsed >= ttl
+    """
+    To fiercely conserve API Quota, we NEVER call Gemini on scheduled 5-minute ticks.
+    Gemini is only executed ONCE autonomously upon initial deployment/creation.
+    """
+    return False
 
 
 # auto re route if its approved

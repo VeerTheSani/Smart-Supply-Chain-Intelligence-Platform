@@ -97,17 +97,39 @@ async def _get_or_404(id: str) -> dict:
 
 
 async def _initial_risk_assessment(shipment_id, doc: dict):
-    """Run risk calculation immediately after creation and persist to MongoDB."""
+    """Run risk calculation immediately after creation and persist to MongoDB in two stages to prevent UI hangs."""
     try:
         from routers.risk_engine import calculate_risk
-        assessment = await calculate_risk(doc)
-        assessment_to_store = {**assessment, "computed_at": assessment["computed_at"].isoformat()}
+        
+        # STAGE 1: Fast assessment (Weather, Traffic, Time Buffer)
+        doc["_skip_gemini"] = True
+        fast_assessment = await calculate_risk(doc)
+        
+        # Inject our loading reason explicitly into the cached frontend risk
+        if "historical" in fast_assessment.get("breakdown", {}):
+            fast_assessment["breakdown"]["historical"]["reason"] = "AI Intel is currently analyzing..."
+            
+        fast_to_store = {**fast_assessment, "computed_at": fast_assessment["computed_at"].isoformat()}
+        
         await db.shipments.update_one(
             {"_id": shipment_id},
-            {"$set": {"last_risk_assessment": assessment_to_store, "updated_at": datetime.now(timezone.utc)},
-             "$push": {"risk_history": assessment_to_store}},
+            {"$set": {"last_risk_assessment": fast_to_store, "updated_at": datetime.now(timezone.utc)}}
         )
-        logger.info(f"Initial risk assessment stored for {shipment_id}: {assessment['risk_level']} ({assessment['final_score']})")
+        logger.info(f"Stage 1 initial assessment stored for {shipment_id}: {fast_assessment['risk_level']}")
+        
+        # STAGE 2: Deep assessment (Gemini AI Intel takes ~10-15 seconds)
+        doc["_skip_gemini"] = False
+        final_assessment = await calculate_risk(doc)
+        
+        final_to_store = {**final_assessment, "computed_at": final_assessment["computed_at"].isoformat()}
+        
+        await db.shipments.update_one(
+            {"_id": shipment_id},
+            {"$set": {"last_risk_assessment": final_to_store, "updated_at": datetime.now(timezone.utc)},
+             "$push": {"risk_history": final_to_store}},
+        )
+        logger.info(f"Stage 2 (Final) risk assessment stored for {shipment_id}: {final_assessment['risk_level']} ({final_assessment['final_score']})")
+        
     except Exception as e:
         logger.error(f"Initial risk assessment failed for {shipment_id}: {e}")
 

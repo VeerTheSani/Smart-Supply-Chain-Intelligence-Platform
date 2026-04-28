@@ -7,6 +7,7 @@
 import httpx
 import os
 import json
+import re
 import logging
 from dotenv import load_dotenv
 load_dotenv()
@@ -85,7 +86,7 @@ If no disruptions found, return severity_score 0 and empty events_found array.""
     }
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 GEMINI_URL,
                 params={"key": GEMINI_API_KEY},
@@ -94,25 +95,21 @@ If no disruptions found, return severity_score 0 and empty events_found array.""
             resp.raise_for_status()
             data = resp.json()
 
-        # Extract text from response
-        text = (
-            data.get("candidates", [{}])[0]
-                .get("content", {})
-                .get("parts", [{}])[0]
-                .get("text", "")
-        )
+        # Extract all text parts since Search Grounding may return prose or citations alongside the JSON
+        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+        combined_text = "".join([p.get("text", "") for p in parts if p.get("text")])
 
-        if not text:
+        if not combined_text:
             logger.warning("Gemini returned empty response")
             return _default_response("Empty response from Gemini")
 
-        # Clean up response — remove markdown fences if present
-        text = text.strip()
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-        text = text.strip()
+        # Extract JSON using Regex in case it is wrapped in prose
+        import re
+        json_match = re.search(r'\{.*\}', combined_text, re.DOTALL)
+        if json_match:
+            text = json_match.group(0)
+        else:
+            text = combined_text
 
         # Fix newlines inside JSON string values — Gemini sometimes does this
         import re
@@ -140,27 +137,10 @@ If no disruptions found, return severity_score 0 and empty events_found array.""
         return _default_response("Gemini timed out")
     except httpx.HTTPError as e:
         logger.error(f"Gemini HTTP error: {e}")
-        return _mock_events_fallback(roads_str)
+        return _default_response(f"Gemini API error: {e}")
     except Exception as e:
         logger.error(f"Gemini unexpected error: {e}")
-        return _mock_events_fallback(roads_str)
-
-
-def _mock_events_fallback(roads_str: str) -> dict:
-    """Provides a realistic mock response when Gemini API limits are exhausted."""
-    return {
-        "severity_score": 25,
-        "events_found": [
-            {
-                "type": "ROAD_WORKS",
-                "location": roads_str,
-                "description": "Simulated AI Intel (API Limit): Highway maintenance causing lane reductions.",
-                "impact": "LOW"
-            }
-        ],
-        "primary_concern": "Simulated AI Intel: General road maintenance and typical congestion patterns.",
-        "confidence": "MEDIUM",
-    }
+        return _default_response(str(e))
 
 def _default_response(reason: str) -> dict:
     """Safe fallback when Gemini fails — neutral score, don't crash risk engine."""
@@ -236,11 +216,11 @@ If score < 40, safe_waypoint and incident_location must be empty strings."""
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "tools": [{"googleSearch": {}}],
-        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 512},
+        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 8192},
     }
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 GEMINI_URL,
                 params={"key": GEMINI_API_KEY},
@@ -249,24 +229,20 @@ If score < 40, safe_waypoint and incident_location must be empty strings."""
             resp.raise_for_status()
             data = resp.json()
 
-        text = (
-            data.get("candidates", [{}])[0]
-                .get("content", {})
-                .get("parts", [{}])[0]
-                .get("text", "")
-        )
+        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+        combined_text = "".join([p.get("text", "") for p in parts if p.get("text")])
 
-        if not text:
+        if not combined_text:
             logger.warning("Gemini road disturbance: empty response")
-            return _disturbance_fallback("unavailable")
+            return _mock_disturbance_fallback("unavailable")
 
-        text = text.strip()
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-        text = text.strip()
-        text = _re.sub(r':\s*"([^"]*)\n([^"]*)"', lambda m: ': "' + m.group(1).strip() + ' ' + m.group(2).strip() + '"', text)
+        import re
+        json_match = re.search(r'\{.*\}', combined_text, re.DOTALL)
+        if json_match:
+            text = json_match.group(0)
+        else:
+            text = combined_text
+        text = re.sub(r':\s*"([^"]*)\n([^"]*)"', lambda m: ': "' + m.group(1).strip() + ' ' + m.group(2).strip() + '"', text)
 
         result = json.loads(text)
         result.setdefault("score", 0)
@@ -295,19 +271,10 @@ If score < 40, safe_waypoint and incident_location must be empty strings."""
         return _disturbance_fallback("unavailable")
     except httpx.HTTPError as e:
         logger.error(f"Road disturbance Gemini HTTP error: {e}")
-        return _mock_disturbance_fallback(roads_str)
+        return _disturbance_fallback("unavailable")
     except Exception as e:
         logger.error(f"Road disturbance unexpected error: {e}")
-        return _mock_disturbance_fallback(roads_str)
-
-def _mock_disturbance_fallback(roads_str: str) -> dict:
-    """Provides a realistic mock response for risk intel when API limits are exhausted."""
-    return {
-        "score": 20, 
-        "reason": f"Simulated Intel (API Limit): Standard transit conditions on {roads_str}.", 
-        "incident_location": "", 
-        "safe_waypoint": ""
-    }
+        return _disturbance_fallback("unavailable")
 
 def _disturbance_fallback(reason: str) -> dict:
     return {"score": 0, "reason": reason, "incident_location": "", "safe_waypoint": ""}

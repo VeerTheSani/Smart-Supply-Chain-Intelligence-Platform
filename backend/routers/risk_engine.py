@@ -6,6 +6,7 @@
 
 import logging
 import math
+import asyncio
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -267,15 +268,26 @@ async def calculate_risk(shipment: dict) -> dict:
 
     logger.info(f"Calculating risk for shipment with {len(waypoints)} waypoints, {len(stored_incidents)} stored incidents")
 
-    import asyncio
-    weather_data, traffic_data, historical_data = await asyncio.gather(
-        _compute_weather_score(waypoints, current_location, origin_coords, eta_seconds, distance_km),
-        _compute_traffic_score(current_location, dest_coords),
-        _compute_historical_score(
-            road_names, planned_date, prev_risk_lvl,
-            origin=origin_name, destination=destination_name, via_point_names=via_point_names,
-        ),
-    )
+    skip_gemini = shipment.get("_skip_gemini", False)
+    
+    if skip_gemini:
+        historical_data = (shipment.get("last_risk_assessment", {}) or {}).get("breakdown", {}).get("historical", {
+            "score": 0, "reason": "No disruption currently active", "weight": WEIGHTS["historical"]
+        })
+        weather_data, traffic_data = await asyncio.gather(
+            _compute_weather_score(waypoints, current_location, origin_coords, eta_seconds, distance_km),
+            _compute_traffic_score(current_location, dest_coords),
+        )
+        logger.debug(f"Skipping Gemini for shipment {shipment.get('_id')} — using cached AI score: {historical_data['score']}")
+    else:
+        weather_data, traffic_data, historical_data = await asyncio.gather(
+            _compute_weather_score(waypoints, current_location, origin_coords, eta_seconds, distance_km),
+            _compute_traffic_score(current_location, dest_coords),
+            _compute_historical_score(
+                road_names, planned_date, prev_risk_lvl,
+                origin=origin_name, destination=destination_name, via_point_names=via_point_names,
+            ),
+        )
     event_data = _compute_event_score(stored_incidents)
 
     time_buffer_data = _compute_time_buffer_score(created_at, eta_seconds)
