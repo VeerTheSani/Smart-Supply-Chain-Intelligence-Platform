@@ -385,7 +385,7 @@ def _compute_three_via_points(origin: dict, dest: dict) -> tuple:
     three via-points in the ocean on one side.
     """
     route_dist_km = _haversine_km(origin["lat"], origin["lng"], dest["lat"], dest["lng"])
-    base_offset   = max(130, min(300, route_dist_km * 0.25))
+    base_offset   = max(route_dist_km * 0.12, min(300, route_dist_km * 0.22))
 
     via_a = _compute_via_point(origin, dest, 0.50, -base_offset)           # left mid
     via_b = _compute_via_point(origin, dest, 0.50,  base_offset)           # right mid (symmetric)
