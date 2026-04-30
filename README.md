@@ -35,7 +35,7 @@ The platform continuously monitors every active shipment in real time, scores ri
 ### The Core Intelligence Loop
 
 ```
-Create Shipment → Geocode → Route (Mappls) → Risk Engine (5 Factors)
+Create Shipment → Geocode → Route (Mappls) → Ai(Gemini) relevent waypoint location web searching → Risk Engine (6 Factors)
        ↓                                            ↓
    Store in MongoDB ←── Background Scheduler (5 min) ──→ WebSocket Alert
        ↓                                            ↓
@@ -51,6 +51,7 @@ Create Shipment → Geocode → Route (Mappls) → Risk Engine (5 Factors)
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
 | **Backend** | FastAPI (Python 3.12, async) | REST API + WebSocket server |
+| **AI Tech** | Google Gemini API | Gemini 2.5 Flash |
 | **Database** | MongoDB Atlas (Motor async driver) | Persistent shipment, risk, notification storage |
 | **Frontend** | React 19 + Vite + TailwindCSS | Glassmorphic dashboard with dark/light themes |
 | **Maps** | Leaflet + React-Leaflet | Interactive shipment tracking visualization |
