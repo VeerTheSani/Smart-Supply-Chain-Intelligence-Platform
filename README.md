@@ -1,6 +1,6 @@
 # 🚀 Smart Supply Chain Intelligence Platform
 
-> **Google Solution Challenge 2026** — A real-time, AI-powered logistics control tower that **predicts disruptions before they happen** and dynamically optimizes shipment routes using risk-aware decision intelligence.
+> **Google Solution Challenge 2026** — A high-fidelity, AI-powered mission control for **Resilient Logistics and Dynamic Supply Chain Optimization**. Designed to preemptively detect disruptions and neutralize cascading delays across complex transportation networks.
 
 <p align="center">
   <img src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white" />
@@ -8,20 +8,23 @@
   <img src="https://img.shields.io/badge/MongoDB-47A248?style=for-the-badge&logo=mongodb&logoColor=white" />
   <img src="https://img.shields.io/badge/Gemini_2.5_Flash-4285F4?style=for-the-badge&logo=google&logoColor=white" />
   <img src="https://img.shields.io/badge/Mappls-FF5722?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/WebSockets-010101?style=for-the-badge&logo=socketdotio&logoColor=white" />
+  <img src="https://img.shields.io/badge/UI_Aesthetic-Glassmorphism-purple?style=for-the-badge" />
 </p>
 
 ---
 
-## 🧠 Problem Statement
+## 🧠 Problem Statement Alignment
 
-Modern supply chains operate in highly volatile environments. Disruptions like severe weather, road closures, traffic congestion, and political events are detected **too late** — after delays have already cascaded across dependent shipments, causing financial losses.
+**Primary Objective:** *Resilient Logistics and Dynamic Supply Chain Optimization*
 
-This platform transforms logistics operations from:
+Modern global supply chains manage millions of concurrent shipments across volatile networks. Critical transit disruptions—from sudden weather events to hidden operational bottlenecks—are chronically identified only after delivery timelines are already compromised.
 
-```
-❌  Reactive Tracking  →  ✅  Predictive + Autonomous Decision-Making
-```
+This platform solves this by providing a **Scalable Intelligence Layer** that:
+1.  **Detects Preemptively:** Uses Gemini AI + Multi-source Telemetry to flag risks *before* they become bottlenecks.
+2.  **Neutralizes Cascades:** Identifies localized delays and calculates their recursive impact across the entire dependent supply chain.
+3.  **Optimizes Dynamically:** Executes high-fidelity route adjustments in real-time to preserve delivery integrity.
+
+---
 
 ---
 
@@ -159,6 +162,49 @@ Multi-channel alert system with intelligent delivery:
 - Risk history charts per shipment
 - Conditions monitoring (weather, traffic)
 - Single API call (`/api/dashboard`) for all dashboard data
+
+---
+
+## 📐 Intelligent Workflows
+
+### 1. Cascading Propagation Logic
+The system prevents "blind delays" by recursively calculating how a single disruption affects the entire downstream chain.
+
+```mermaid
+graph TD
+    A[Lead Shipment Delayed] -->|Detect| B(Propagation Engine)
+    B -->|BFS Traversal| C{Dependency Graph}
+    C -->|Recursive Shift| D[Shipment B: Departure Locked]
+    C -->|Recursive Shift| E[Shipment C: Buffer Consumed]
+    D -->|Accumulated Delay| F[End-to-End Visibility]
+    E -->|Accumulated Delay| F
+    style A fill:#ef4444,stroke:#333,stroke-width:2px,color:#fff
+    style F fill:#3b82f6,stroke:#333,stroke-width:2px,color:#fff
+```
+
+### 2. Multi-Vector Rerouting Decision
+When risk escalates, the system computes distinct alternatives based on multifaceted telemetry.
+
+```mermaid
+graph LR
+    subgraph "Risk Detection"
+    T[TomTom Incidents]
+    M[Mappls Traffic]
+    G[Gemini AI Intel]
+    end
+
+    T & M & G --> Decision{Decision Engine}
+
+    Decision -->|Avoidance| R1[Bypass TomTom Corridor]
+    Decision -->|Recommended| R2[Balanced Risk/Time Route]
+    Decision -->|Gemini Bypass| R3[AI-Suggested Safe City Route]
+
+    R3 -->|Geocode| GC[Gemini Safe Waypoint]
+    GC -->|Re-Route| EXEC[Dynamic Update]
+    
+    style G fill:#4285f4,stroke:#333,stroke-width:2px,color:#fff
+    style R3 fill:#8b5cf6,stroke:#333,stroke-width:2px,color:#fff
+```
 
 ---
 
