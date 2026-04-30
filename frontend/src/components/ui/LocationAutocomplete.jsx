@@ -92,12 +92,12 @@ export default function LocationAutocomplete({
 
       {/* Dropdown Menu */}
       {isOpen && suggestions.length > 0 && (
-        <div className="absolute z-50 w-full mt-1 bg-theme-secondary border border-theme rounded-xl shadow-2xl py-1 overflow-hidden transform opacity-100 transition-all">
+        <div className="absolute z-50 w-full mt-1 border border-theme rounded-xl shadow-2xl py-1 overflow-hidden" style={{ background: 'var(--dropdown-bg, #1a1a1a)' }}>
           {suggestions.map((suggestion) => (
             <div
               key={suggestion.place_id}
               onClick={() => handleSelect(suggestion)}
-              className="px-4 py-2 hover:bg-theme-tertiary cursor-pointer flex items-start gap-3 transition-colors"
+              className="px-4 py-2 cursor-pointer flex items-start gap-3 transition-colors" style={{ }} onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.07)'} onMouseLeave={e => e.currentTarget.style.background = ''}
             >
               <MapPin className="w-4 h-4 text-theme-secondary mt-0.5 shrink-0" />
               <div className="flex flex-col">

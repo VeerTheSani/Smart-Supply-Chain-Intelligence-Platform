@@ -1,47 +1,75 @@
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { AlertTriangle, MapPin } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 import { useShipments } from '../hooks/useShipments';
+import { useShipmentStore } from '../stores/shipmentStore';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import ErrorFallback from '../components/ui/ErrorFallback';
+import DisruptionSummaryBar from '../components/disruptions/DisruptionSummaryBar';
+import DisruptionFilterTabs from '../components/disruptions/DisruptionFilterTabs';
+import DisruptionCard from '../components/disruptions/DisruptionCard';
+
+const RISK_ORDER = { critical: 0, high: 1, medium: 2 };
 
 const Disruptions = memo(function Disruptions() {
-  const { data: shipments, isLoading, error } = useShipments();
+  const { isLoading, error } = useShipments();
+  const shipments = useShipmentStore(s => s.shipments);
+  const [filter, setFilter] = useState('ALL');
 
   if (isLoading) return <div className="py-20 flex justify-center"><LoadingSpinner /></div>;
   if (error) return <ErrorFallback error={error} />;
 
-  const disrupted = shipments?.filter(s => s.risk?.current?.risk_level === 'high' || s.risk?.current?.risk_level === 'medium') || [];
+  const disrupted = (shipments || [])
+    .filter(s => ['critical', 'high', 'medium'].includes(s.risk?.current?.risk_level))
+    .sort((a, b) => (RISK_ORDER[a.risk?.current?.risk_level] ?? 9) - (RISK_ORDER[b.risk?.current?.risk_level] ?? 9));
+
+  const filtered = filter === 'ALL'
+    ? disrupted
+    : disrupted.filter(s => s.risk?.current?.risk_level === filter.toLowerCase());
+
+  const counts = {
+    total:    disrupted.length,
+    critical: disrupted.filter(s => s.risk?.current?.risk_level === 'critical').length,
+    high:     disrupted.filter(s => s.risk?.current?.risk_level === 'high').length,
+    medium:   disrupted.filter(s => s.risk?.current?.risk_level === 'medium').length,
+  };
 
   return (
-    <div className="space-y-6 bg-theme-primary">
-      <motion.h1
-        initial={{ opacity: 0, x: -10 }}
-        animate={{ opacity: 1, x: 0 }}
-        className="text-lg sm:text-xl md:text-2xl font-bold text-theme-primary flex items-center gap-2"
-      >
-        <AlertTriangle className="w-6 h-6 text-danger" />
-        Active Disruptions
-      </motion.h1>
+    <div className="space-y-5 bg-theme-primary">
+      <div>
+        <motion.h1
+          initial={{ opacity: 0, x: -10 }}
+          animate={{ opacity: 1, x: 0 }}
+          className="text-lg sm:text-xl md:text-2xl font-bold text-theme-primary flex items-center gap-2"
+        >
+          <AlertTriangle className="w-6 h-6 text-danger" />
+          Active Disruptions
+        </motion.h1>
+        <motion.p
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1 }}
+          className="text-theme-secondary text-sm mt-1"
+        >
+          Real-time risk intelligence across your active fleet
+        </motion.p>
+      </div>
+
+      <DisruptionSummaryBar disrupted={disrupted} />
+      <DisruptionFilterTabs active={filter} onChange={setFilter} counts={counts} />
 
       <div className="grid gap-4">
-        {disrupted.length === 0 ? (
-          <div className="bg-theme-secondary p-8 text-center text-theme-secondary rounded-xl border border-theme">No active disruptions. Fleet is operating optimally.</div>
+        {filtered.length === 0 ? (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="bg-theme-secondary p-10 text-center text-theme-secondary rounded-xl border border-theme"
+          >
+            {disrupted.length === 0
+              ? '✅ Fleet operating optimally — no active disruptions.'
+              : `No ${filter.toLowerCase()} disruptions found.`}
+          </motion.div>
         ) : (
-          disrupted.map((shipment, i) => (
-             <motion.div 
-               initial={{ opacity: 0, y: 10 }}
-               animate={{ opacity: 1, y: 0 }}
-               transition={{ delay: i * 0.1 }}
-               key={shipment.id} 
-               className={`bg-theme-secondary p-6 rounded-xl border-l-4 border-theme shadow-md ${shipment.risk?.current?.risk_level === 'high' ? 'border-l-danger bg-danger/5' : 'border-l-warning bg-warning/5'}`}
-             >
-               <h3 className="text-theme-primary font-bold mb-3 tracking-wide">Tracking ID: <span className="font-mono text-accent">{shipment.tracking_number}</span></h3>
-               <p className="text-sm text-theme-secondary flex items-center gap-2"><MapPin className="w-4 h-4"/> {shipment.origin} <span className="opacity-50">→</span> {shipment.destination}</p>
-               <p className="text-sm text-theme-secondary mt-3 font-mono">
-                 <span className="font-bold uppercase tracking-wider text-xs opacity-70">ROOT CAUSE:</span> {shipment.risk?.current?.reason}
-               </p>
-             </motion.div>
+          filtered.map((shipment, i) => (
+            <DisruptionCard key={shipment.id} shipment={shipment} index={i} />
           ))
         )}
       </div>

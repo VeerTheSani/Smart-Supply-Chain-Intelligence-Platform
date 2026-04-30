@@ -1,8 +1,12 @@
 import { memo, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Activity, AlertTriangle, TrendingUp, Navigation, Package } from 'lucide-react';
+import { Activity, AlertTriangle, Navigation, Package } from 'lucide-react';
 import { useDashboard } from '../hooks/useDashboard';
 import { useShipments } from '../hooks/useShipments';
+import RiskDonutChart from '../components/dashboard/RiskDonutChart';
+import StatusFlowBar from '../components/dashboard/StatusFlowBar';
+import LiveIntelFeed from '../components/dashboard/LiveIntelFeed';
+import RiskRadarChart from '../components/dashboard/RiskRadarChart';
 import { MapContainer, TileLayer, Marker, Popup, useMap, Tooltip } from 'react-leaflet';
 import { useShipmentStore } from '../stores/shipmentStore';
 import { useTheme } from '../context/ThemeContext';
@@ -22,30 +26,44 @@ let DefaultIcon = L.icon({
 });
 L.Marker.prototype.options.icon = DefaultIcon;
 
-const StatCard = memo(function StatCard({ title, value, icon: Icon, trend, colorClass, delay }) {
+const StatCard = memo(function StatCard({ title, value, icon: Icon, accent, delay, subtext, bar }) {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay }}
-      className={`bg-theme-secondary rounded-2xl p-4 sm:p-6 border-default shadow-md border-b-4 ${colorClass}`}
+      transition={{ delay, ease: 'easeOut' }}
+      className="card-standard flex flex-col gap-3 group hover:scale-[1.01] transition-transform duration-200"
     >
-      <div className="flex justify-between items-start gap-2">
-        <div className="space-y-2 sm:space-y-4 flex-1 min-w-0">
-          <p className="text-theme-secondary text-[10px] sm:text-sm font-semibold tracking-wider uppercase truncate">{title}</p>
-          <div className="flex items-end gap-1.5 sm:gap-3 flex-wrap">
-            <h3 className="text-2xl sm:text-3xl md:text-4xl font-bold text-theme-primary tracking-tight break-all">{value}</h3>
-            {trend && (
-              <span className={`flex items-center gap-1 text-[10px] sm:text-sm font-medium pb-1 ${trend > 0 ? 'text-success' : 'text-danger'}`}>
-                {trend > 0 ? '+' : ''}{trend}% <TrendingUp className="w-3 h-3" />
-              </span>
-            )}
-          </div>
+      {/* Top row: icon pill + title */}
+      <div className="flex items-center gap-2.5">
+        <div className="p-2 rounded-xl shrink-0" style={{ background: `${accent}18` }}>
+          <Icon className="w-4 h-4" style={{ color: accent }} />
         </div>
-        <div className={`p-2 sm:p-3 rounded-xl bg-theme-tertiary shadow-inner shrink-0 ${colorClass.replace('border-', 'text-')}`}>
-          <Icon className="w-4 h-4 sm:w-6 sm:h-6" />
-        </div>
+        <p className="text-[11px] font-bold tracking-widest uppercase text-theme-secondary truncate">{title}</p>
       </div>
+
+      {/* Value */}
+      <div className="flex items-baseline gap-2">
+        <span className="text-3xl font-black text-theme-primary tabular-nums leading-none">{value}</span>
+      </div>
+
+      {/* Bar */}
+      {bar !== undefined && (
+        <div className="h-1 rounded-full bg-theme-tertiary overflow-hidden">
+          <motion.div
+            className="h-full rounded-full"
+            style={{ background: accent }}
+            initial={{ width: 0 }}
+            animate={{ width: bar > 0 ? `${Math.min(bar, 100)}%` : '4%' }}
+            transition={{ duration: 0.8, delay: delay + 0.2, ease: 'easeOut' }}
+          />
+        </div>
+      )}
+
+      {/* Subtext */}
+      {subtext && (
+        <p className="text-[11px] text-theme-secondary opacity-70 truncate -mt-1">{subtext}</p>
+      )}
     </motion.div>
   );
 });
@@ -96,15 +114,18 @@ const getIncidentIcon = (type) => {
   const color =
     ["ROAD_CLOSED", "ACCIDENT"].includes(type) ? "#ef4444" :
       ["JAM", "ROAD_WORKS"].includes(type) ? "#f97316" : "#facc15";
+  const glow = color === "#ef4444" ? "rgba(239, 68, 68, 0.6)" : "rgba(249, 115, 22, 0.6)";
+  
   return new L.DivIcon({
-    className: "",
-    iconSize: [22, 22],
-    iconAnchor: [11, 11],
+    className: "incident-marker-glass",
+    iconSize: [26, 26],
+    iconAnchor: [13, 13],
     html: `<div style="
-      background:${color};width:22px;height:22px;border-radius:50%;
-      border:2px solid white;display:flex;align-items:center;
-      justify-content:center;font-size:11px;
-      box-shadow:0 2px 6px rgba(0,0,0,0.4)">⚠️</div>`
+      background:${color}cc; width:26px; height:26px; border-radius:50%;
+      border:2px solid rgba(255,255,255,0.8); display:flex; align-items:center;
+      justify-content:center; font-size:12px; backdrop-filter:blur(4px);
+      box-shadow:0 0 15px ${glow}, 0 4px 8px rgba(0,0,0,0.5);
+      animation: pulse 2s infinite">⚠️</div>`
   });
 };
 
@@ -224,29 +245,61 @@ const AnimatedLiveTruck = memo(function AnimatedLiveTruck({ shipment, isSelected
         </div>
       </Tooltip>
 
-      <Popup className="custom-popup border-0">
-        <div className="flex flex-col gap-1 min-w-[160px]">
-          <strong className="text-theme-primary border-b border-theme pb-1 mb-1 text-sm">
-            {shipment.tracking_number}
-          </strong>
-          <span className="text-theme-secondary text-[11px] font-bold">
-            Route: {shipment.origin_name} → {shipment.destination_name}
-          </span>
-          <div className="flex justify-between mt-1 pt-1 border-t border-theme border-dashed">
-            <span className={`text-[9px] px-2 py-0.5 rounded text-white ${isHigh ? "bg-danger" : isMed ? "bg-warning" : "bg-success"}`}>
-              Risk: {riskLevel}
-            </span>
-            <span className={`text-[9px] px-1.5 py-0.5 rounded ${delayClass}`}>
-              ETA: {etaDelay}
+      <Popup className="custom-popup">
+        <div className="flex flex-col gap-3 min-w-[240px] py-1">
+          {/* Header with Tracking ID */}
+          <div className="flex items-center justify-between">
+            <span className="text-lg font-black tracking-tight text-theme-primary">
+              {shipment.tracking_number}
             </span>
           </div>
-          {shipment.risk?.current?.reason &&
-            !shipment.risk.current.reason.toLowerCase().includes('unavailable') &&
-            !shipment.risk.current.reason.toLowerCase().includes('not available') && (
-              <div className="bg-danger/10 mt-1 p-1 rounded border border-danger/20 text-danger text-[9px]">
-                ⚠️ {shipment.risk.current.reason}
+
+          {/* Route Info */}
+          <div className="space-y-1">
+            <p className="text-[10px] uppercase font-bold tracking-widest text-theme-secondary opacity-60">Route</p>
+            <p className="text-xs font-medium text-theme-primary leading-tight">
+              {shipment.origin_name} <span className="text-accent mx-1">→</span> {shipment.destination_name}
+            </p>
+          </div>
+
+          {/* Status Pills */}
+          <div className="flex items-center gap-2">
+            <div className={`px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1.5 ${isHigh ? "bg-danger/20 text-danger border border-danger/30" : isMed ? "bg-warning/20 text-warning border border-warning/30" : "bg-success/20 text-success border border-success/30"}`}>
+              <div className={`w-1.5 h-1.5 rounded-full ${isHigh ? "bg-danger" : isMed ? "bg-warning" : "bg-success"}`} />
+              Risk: {riskLevel}
+            </div>
+            <div className={`px-2 py-1 rounded-lg text-[10px] font-bold border ${delayClass.replace('text-', 'text-').replace('bg-', 'bg-').split(' ').map(c => c.includes('/') ? c : c+'/20').join(' ')}`}>
+              ETA: {etaDelay}
+            </div>
+          </div>
+
+          {/* Alert / Reason Section - Red Box Style */}
+          {((shipment.route_incidents?.length || 0) > 0 || (incidentOverride[shipment.id]?.length || 0) > 0 || shipment.risk?.current?.reason) && (
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-danger/15 p-3 rounded-2xl border border-danger/25 space-y-2"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="flex -space-x-1.5">
+                    {[...Array(Math.min(3, (shipment.route_incidents?.length || incidentOverride[shipment.id]?.length || 0) || 1))].map((_, i) => (
+                      <div key={i} className="w-5 h-5 rounded-full bg-danger border-2 border-[#1a1a25] flex items-center justify-center text-[10px] text-white shadow-lg">⚠️</div>
+                    ))}
+                  </div>
+                  <span className="text-[10px] font-black text-danger uppercase tracking-tighter">
+                    {((shipment.route_incidents?.length || incidentOverride[shipment.id]?.length || 0)) || 1} System Event{((shipment.route_incidents?.length || incidentOverride[shipment.id]?.length || 0)) > 1 ? 's' : ''}
+                  </span>
+                </div>
               </div>
-            )}
+              
+              <p className="text-[11px] text-danger/90 font-bold leading-tight">
+                {shipment.risk?.current?.reason && !shipment.risk.current.reason.toLowerCase().includes('unavailable') 
+                  ? shipment.risk.current.reason 
+                  : "Critical delay risks and route disruptions detected on primary path."}
+              </p>
+            </motion.div>
+          )}
         </div>
       </Popup>
     </Marker>
@@ -326,10 +379,36 @@ const Dashboard = memo(function Dashboard() {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-        <StatCard title="Total Shipments" value={data?.total_shipments || 0} icon={Package} trend={12} colorClass="border-theme" delay={0.1} />
-        <StatCard title="Active Disruptions" value={data?.active_disruptions || 0} icon={AlertTriangle} colorClass={data?.active_disruptions > 0 ? 'border-primary-500' : 'border-success'} delay={0.2} />
-        <StatCard title="Avg Risk Score" value={data?.avg_risk_score ? data.avg_risk_score.toFixed(1) : "0"} icon={Activity} trend={-5} colorClass={isLowRisk ? 'border-success' : 'border-warning'} delay={0.3} />
-        <StatCard title="Optimized Routes" value={data?.optimized_routes || 0} icon={Navigation} trend={24} colorClass="border-primary-400" delay={0.4} />
+        <StatCard
+          title="Total Shipments" value={data?.total_shipments || 0} icon={Package}
+          accent="#a78bfa" delay={0.1}
+          bar={data?.total_shipments ? Math.min(data.total_shipments * 10, 100) : 0}
+          subtext={`${data?.risk_counts?.critical || 0} critical · ${data?.risk_counts?.high || 0} high`}
+        />
+        <StatCard
+          title="Active Disruptions" value={data?.active_disruptions || 0} icon={AlertTriangle}
+          accent={data?.active_disruptions > 0 ? '#ff5555' : '#22c55e'} delay={0.2}
+          bar={data?.total_shipments ? Math.round((data.active_disruptions / Math.max(data.total_shipments, 1)) * 100) : 0}
+          subtext={`${data?.status_counts?.rerouting || 0} rerouting now`}
+        />
+        <StatCard
+          title="Avg Risk Score" value={data?.avg_risk_score ? data.avg_risk_score.toFixed(1) : '0'} icon={Activity}
+          accent={isLowRisk ? '#22c55e' : '#facc15'} delay={0.3}
+          bar={data?.avg_risk_score || 0}
+          subtext={isLowRisk ? 'Fleet is safe' : 'Elevated network risk'}
+        />
+        <StatCard
+          title="Optimized Routes" value={data?.optimized_routes || 0} icon={Navigation}
+          accent="#e53935" delay={0.4}
+          bar={data?.total_shipments ? Math.round((data.optimized_routes / Math.max(data.total_shipments, 1)) * 100) : 0}
+          subtext={`${data?.status_counts?.delivered || 0} delivered`}
+        />
+      </div>
+
+      {/* Charts row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+        <RiskDonutChart riskCounts={data?.risk_counts || {}} />
+        <StatusFlowBar  statusCounts={data?.status_counts || {}} />
       </div>
 
       <motion.div
@@ -448,8 +527,9 @@ const Dashboard = memo(function Dashboard() {
           </MapContainer>
 
           {/* Live summary overlay */}
-          <div className="absolute top-2 right-2 sm:top-4 sm:right-4 bg-theme-secondary/90 p-2 sm:p-4 rounded-lg sm:rounded-xl w-40 sm:w-52 z-[1000] border border-theme text-[10px] sm:text-xs shadow-lg">
-            <h3 className="font-bold mb-2 text-theme-primary">Live Status</h3>
+          <div className="absolute top-4 right-4 bg-theme-secondary/80 dark:bg-[#0a0a0f]/85 backdrop-blur-2xl p-4 rounded-2xl w-56 z-[1000] border border-white/10 text-xs shadow-2xl overflow-hidden shimmer">
+            <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent pointer-events-none" />
+            <h3 className="font-black mb-3 text-theme-primary tracking-tight uppercase text-[10px] opacity-70">Network Intelligence</h3>
             {fetchingIncidents > 0 && (
               <div className="mb-2">
                 <div className="flex justify-between text-[10px] text-theme-secondary mb-1">
@@ -485,6 +565,11 @@ const Dashboard = memo(function Dashboard() {
           </div>
         </div>
       </motion.div>
+      {/* Intel Feed + Radar row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+        <LiveIntelFeed recentAlerts={data?.recent_alerts || []} />
+        <RiskRadarChart />
+      </div>
     </div>
   );
 });

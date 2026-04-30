@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 
 from core.scheduler import start_scheduler, stop_scheduler
 from database import db
-from routers import shipments, risk, reroute, websocket, dashboard, incidents, notifications, scenario, cascade
+from routers import shipments, risk, reroute, websocket, dashboard, incidents, notifications, scenario, cascade, system
 
 
 @asynccontextmanager
@@ -83,6 +83,7 @@ app.include_router(websocket.router)
 app.include_router(incidents.router)
 app.include_router(notifications.router)
 app.include_router(cascade.router)
+app.include_router(system.router)
 
 
 @app.get("/")

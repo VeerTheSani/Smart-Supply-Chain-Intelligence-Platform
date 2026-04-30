@@ -93,25 +93,25 @@ const NotificationPanel = memo(function NotificationPanel({ isOpen }) {
       initial={{ opacity: 0, y: 20, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 20, scale: 0.98 }}
-      className="absolute top-[calc(100%+16px)] right-0 sm:right-0 w-[calc(100vw-2rem)] sm:w-[460px] max-h-[80vh] flex flex-col bg-theme-secondary dark:bg-[#0f172a] shadow-[0_20px_70px_-15px_rgba(0,0,0,0.5)] border border-theme dark:border-slate-800 rounded-2xl overflow-hidden z-[9999] origin-top-right backdrop-blur-2xl"
+      className="absolute top-[calc(100%+16px)] right-0 sm:right-0 w-[calc(100vw-2rem)] sm:w-[480px] max-h-[82vh] flex flex-col bg-[#050508]/95 backdrop-blur-[60px] saturate-[200%] shadow-[0_20px_100px_-15px_rgba(0,0,0,1)] border border-white/20 rounded-[32px] overflow-hidden z-[9999] origin-top-right transition-all"
     >
       {/* ========== HEADER ========== */}
-      <div className="p-4 border-b bg-theme-secondary border-theme shrink-0">
+      <div className="p-4 border-b bg-white/5 dark:bg-black/20 border-white/5 shrink-0">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent shadow-sm">
+            <div className="w-10 h-10 rounded-xl bg-accent/20 border border-accent/30 flex items-center justify-center text-accent shadow-[0_0_15px_rgba(var(--accent-rgb),0.3)]">
               <ShieldAlert className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-theme-primary dark:text-slate-100 text-sm tracking-tight">
+              <h3 className="font-black text-theme-primary dark:text-slate-100 text-sm tracking-tight uppercase">
                 {showSettings ? 'Audit Preferences' : 'Control Tower'}
               </h3>
               <div className="flex items-center gap-2 mt-0.5">
                 <span className="flex items-center gap-1 text-[9px] font-black text-emerald-500 uppercase tracking-widest">
-                  <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
                   {showSettings ? 'Configuration' : 'Live Audit'}
                 </span>
-                <span className="text-theme-secondary dark:text-slate-600 text-[9px] uppercase tracking-widest">• Intelligence v3.4</span>
+                <span className="text-theme-secondary dark:text-slate-400 text-[9px] uppercase tracking-widest font-bold opacity-60">• Intelligence v3.4</span>
               </div>
             </div>
           </div>
@@ -120,20 +120,20 @@ const NotificationPanel = memo(function NotificationPanel({ isOpen }) {
             {stats.unread > 0 && (
               <button
                 onClick={markAllAsRead}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-theme-secondary hover:bg-theme-tertiary text-theme-primary hover:text-accent transition-all border border-theme text-[10px] font-bold uppercase tracking-tight"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-theme-primary hover:text-accent transition-all border border-white/5 text-[10px] font-black uppercase tracking-tight"
               >
                 <CheckCheck className="w-3.5 h-3.5" />
                 Clear All
               </button>
             )}
-            <div className="w-px h-4 bg-theme mx-1" />
+            <div className="w-px h-4 bg-white/10 mx-1" />
             <button
               onClick={() => setShowSettings(!showSettings)}
               className={cn(
-                "p-2 rounded-lg transition-all",
+                "p-2 rounded-lg transition-all border border-transparent",
                 showSettings
-                  ? "bg-theme-secondary"
-                  : "bg-theme-secondary dark:bg-slate-950/20"
+                  ? "bg-accent/20 text-accent border-accent/20"
+                  : "bg-white/5 hover:bg-white/10"
               )}
             >
               <Settings className="w-4 h-4" />
@@ -151,11 +151,11 @@ const NotificationPanel = memo(function NotificationPanel({ isOpen }) {
                 placeholder="Search shipment logs..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-4 py-2 text-xs bg-theme-secondary border border-theme rounded-xl text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent/30 transition-all"
+                className="w-full pl-9 pr-4 py-2 text-xs bg-black/20 border border-white/5 rounded-xl text-theme-primary focus:outline-none focus:ring-1 focus:ring-accent/30 transition-all placeholder:text-theme-secondary/50"
               />
             </div>
 
-            <div className="flex p-1 bg-theme-tertiary dark:bg-slate-900/40 rounded-xl border border-theme dark:border-slate-800/50">
+            <div className="flex p-1 bg-black/20 rounded-xl border border-white/5">
               {[
                 { key: 'active', label: 'Active', count: stats.unread },
                 { key: 'flagged', label: 'Flagged', count: stats.flagged },
@@ -165,15 +165,15 @@ const NotificationPanel = memo(function NotificationPanel({ isOpen }) {
                   key={tab.key}
                   onClick={() => setActiveTab(tab.key)}
                   className={cn(
-                    "flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                    "flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
                     activeTab === tab.key
-                      ? "bg-theme-secondary hover:bg-theme-tertiary text-accent shadow-sm border border-theme dark:border-slate-700"
-                      : "text-theme-secondary dark:text-slate-500 hover:text-theme-primary"
+                      ? "bg-white/10 text-accent shadow-lg border border-white/10"
+                      : "text-theme-secondary dark:text-slate-400 hover:text-theme-primary hover:bg-white/5"
                   )}
                 >
                   {tab.label}
                   {tab.count > 0 && (
-                    <span className="px-1.5 py-0.5 rounded-full bg-accent text-white text-[8px] font-black">{tab.count}</span>
+                    <span className="px-1.5 py-0.5 rounded-full bg-accent text-white text-[8px] font-black shadow-[0_0_10px_rgba(var(--accent-rgb),0.5)]">{tab.count}</span>
                   )}
                 </button>
               ))}
@@ -183,7 +183,7 @@ const NotificationPanel = memo(function NotificationPanel({ isOpen }) {
       </div>
 
       {/* ========== CONTENT ========== */}
-      <div className="overflow-y-auto flex-1 custom-scrollbar min-h-[300px] bg-theme-secondary dark:bg-slate-950/20">
+      <div className="overflow-y-auto flex-1 custom-scrollbar min-h-[300px] bg-transparent">
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
@@ -191,7 +191,7 @@ const NotificationPanel = memo(function NotificationPanel({ isOpen }) {
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -10 }}
             transition={{ duration: 0.15 }}
-            className="divide-y divide-theme/50 dark:divide-slate-800/50"
+            className="divide-y divide-white/5"
           >
             {showSettings ? (
               <SettingsView prefs={prefs} />
@@ -219,18 +219,18 @@ const NotificationPanel = memo(function NotificationPanel({ isOpen }) {
       </div>
 
       {/* ========== FOOTER ========== */}
-      <div className="px-4 py-3 bg-theme-tertiary dark:bg-[#0f172a] border-t border-theme dark:border-slate-800 flex items-center justify-between">
+      <div className="px-4 py-3 bg-black/20 border-t border-white/5 flex items-center justify-between">
         <div className="flex gap-2">
           <button
             onClick={exportAsCSV}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest text-theme-secondary hover:text-accent hover:bg-accent/5 transition-all border border-transparent hover:border-accent/10"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest text-theme-secondary hover:text-accent hover:bg-accent/10 transition-all border border-transparent hover:border-accent/20"
           >
             <Download className="w-3 h-3" />
             Export Audit
           </button>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex bg-theme-secondary dark:bg-slate-900 rounded-lg border border-theme dark:border-slate-800 overflow-hidden">
+          <div className="flex bg-black/20 rounded-lg border border-white/5 overflow-hidden">
             {[
               { key: 'all', label: 'ALL' },
               { key: 'real', label: 'LIVE' },
@@ -240,8 +240,8 @@ const NotificationPanel = memo(function NotificationPanel({ isOpen }) {
                 key={f.key}
                 onClick={() => setFilterSource(f.key)}
                 className={cn(
-                  "px-3 py-1.5 text-[9px] font-black uppercase tracking-widest transition-all border-r border-theme dark:border-slate-800 last:border-r-0",
-                  filterSource === f.key ? "bg-accent/10 text-accent" : "text-theme-secondary hover:text-theme-primary"
+                  "px-3 py-1.5 text-[9px] font-black uppercase tracking-widest transition-all border-r border-white/5 last:border-r-0",
+                  filterSource === f.key ? "bg-accent/20 text-accent" : "text-theme-secondary hover:text-theme-primary hover:bg-white/5"
                 )}
               >
                 {f.label}

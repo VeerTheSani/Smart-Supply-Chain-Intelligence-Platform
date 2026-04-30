@@ -86,13 +86,13 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-theme-primary/80 backdrop-blur-md transition-all">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-theme-primary/80 transition-all">
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             transition={{ duration: 0.2 }}
-            className="bg-theme-secondary rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl border border-theme flex flex-col relative"
+            className="bg-theme-secondary rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl border border-theme flex flex-col relative custom-scrollbar"
           >
             {/* Header */}
             <div className="p-4 sm:p-6 border-b border-theme flex items-center justify-between bg-theme-tertiary/30">
@@ -220,23 +220,70 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
                 </div>
 
                 {/* Upstream dependency */}
-                <div>
-                  <label className="block text-sm font-bold text-theme-secondary mb-2 uppercase tracking-wide">
-                    Depends on Delivery of...
-                  </label>
-                  <select
-                    value={upstreamId}
-                    onChange={e => setUpstreamId(e.target.value)}
-                    className="w-full bg-theme-tertiary border border-theme text-theme-primary text-sm rounded-xl px-4 py-3 focus:ring-2 focus:ring-accent focus:outline-none transition-all"
-                  >
-                    <option value="">— Operates independently —</option>
-                    {availableShipments.map(s => (
-                      <option key={s.id} value={s.id}>{s.shipment_name} ({s.origin_name} → {s.destination_name})</option>
-                    ))}
-                  </select>
-                  <p className="text-[11px] text-theme-secondary mt-1.5 font-medium">
-                    Select if this shipment can only depart after another arrives
-                  </p>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-sm font-bold text-theme-secondary uppercase tracking-wide">
+                      Systemic Dependency
+                    </label>
+                    <div className="px-2 py-1 bg-accent/10 border border-accent/20 rounded-md">
+                      <span className="text-[10px] font-black text-accent uppercase tracking-tighter italic">CASCADING INTELLIGENCE V3.4</span>
+                    </div>
+                  </div>
+
+                  <div className="relative group">
+                    <select
+                      value={upstreamId}
+                      onChange={e => setUpstreamId(e.target.value)}
+                      className="w-full bg-theme-tertiary border border-theme text-theme-primary text-sm rounded-xl px-4 py-3.5 focus:ring-2 focus:ring-accent focus:outline-none transition-all appearance-none cursor-pointer pr-10 font-bold"
+                    >
+                      <option value="" className="bg-slate-900 text-slate-400">⚡ INDEPENDENT OPERATION (Direct Deployment)</option>
+                      {availableShipments.map(s => (
+                        <option 
+                          key={s.id} 
+                          value={s.id} 
+                          className="bg-slate-900 text-white py-2"
+                        >
+                          🔗 {s.shipment_name.toUpperCase()} (Arrives: {s.destination_name})
+                        </option>
+                      ))}
+                    </select>
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-theme-secondary opacity-50 group-hover:opacity-100 transition-opacity">
+                      <svg className="w-4 h-4 fill-current" viewBox="0 0 20 20">
+                        <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" />
+                      </svg>
+                    </div>
+                  </div>
+
+                  {/* Visual Breakdown / Wireframe-like element */}
+                  <div className={cn(
+                    "p-4 rounded-xl border transition-all duration-300",
+                    upstreamId 
+                      ? "bg-accent/5 border-accent/20" 
+                      : "bg-theme-tertiary/20 border-theme opacity-40 grayscale"
+                  )}>
+                    <div className="flex items-center gap-4">
+                      <div className="flex flex-col items-center gap-1 shrink-0">
+                        <div className={cn("w-3 h-3 rounded-full", upstreamId ? "bg-accent animate-pulse" : "bg-theme-secondary")} />
+                        <div className="w-[2px] h-6 bg-gradient-to-b from-current to-transparent opacity-20" />
+                        <div className={cn("w-3 h-3 rounded-full border-2", upstreamId ? "border-accent" : "border-theme-secondary")} />
+                      </div>
+                      <div className="flex-1 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-black text-theme-secondary uppercase tracking-widest">Logic Stream</span>
+                          <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded", upstreamId ? "bg-accent text-white" : "bg-theme-tertiary text-theme-secondary")}>
+                            {upstreamId ? 'LOCKED' : 'DIRECT'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] leading-relaxed text-theme-primary font-medium">
+                          {upstreamId ? (
+                            <>This shipment will <span className="text-accent font-black">depart only after</span> the delivery of its prerequisite. Real-time ETA delays will automatically push back this deployment schedule.</>
+                          ) : (
+                            "This shipment operates on an independent schedule. No upstream delivery prerequisite is required for departure."
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Auto-Reroute Toggle */}
@@ -281,39 +328,41 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
                 initial={{ opacity: 0 }} 
                 animate={{ opacity: 1 }} 
                 exit={{ opacity: 0 }}
-                className="absolute inset-0 z-50 bg-theme-secondary/80 backdrop-blur-sm flex flex-col items-center justify-center p-8 border border-theme"
+                className="absolute inset-0 z-50 bg-[#0a0a0f]/90 backdrop-blur-[60px] flex flex-col items-center justify-center p-10 border border-white/10"
               >
-                <div className="relative w-16 h-16 mb-6">
-                   <div className="absolute inset-0 rounded-full border-4 border-theme-tertiary" />
-                   <div className="absolute inset-0 rounded-full border-4 border-accent border-t-transparent animate-spin shadow-[0_0_15px_rgba(59,130,246,0.5)]" />
+                <div className="relative w-24 h-24 mb-10">
+                   <div className="absolute inset-0 rounded-full border-[6px] border-white/5" />
+                   <div className="absolute inset-0 rounded-full border-[6px] border-accent border-t-transparent animate-spin shadow-[0_0_30px_rgba(59,130,246,0.5)]" />
+                   <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="w-10 h-10 bg-accent/20 rounded-full animate-pulse blur-sm" />
+                   </div>
                 </div>
-                <h3 className="text-lg font-black text-theme-primary mb-1 uppercase tracking-widest">Deploying Shipment</h3>
-                <p className="text-xs text-theme-secondary font-bold mb-8">Establishing systemic connections</p>
+                <h3 className="text-2xl font-black text-theme-primary mb-2 uppercase tracking-[0.2em]">Deploying Intelligence</h3>
+                <p className="text-[10px] text-theme-secondary font-black uppercase tracking-[0.4em] opacity-60 mb-12">Synchronizing Global Network Nodes</p>
                 
-                <div className="w-full max-w-sm space-y-4">
+                <div className="w-full max-w-sm space-y-5">
                   {[
                     { id: 1, text: 'Resolving Geographic Waypoints', delay: 0 },
                     { id: 2, text: 'Fetching Live Traffic & Incidents', delay: 2 },
                     { id: 3, text: 'Aggregating Weather Predictions', delay: 4 },
                     { id: 4, text: 'Executing AI Risk Engine', delay: 6 }
                   ].map((s, idx) => (
-                    <div key={s.id} className="flex items-center gap-4 text-xs font-bold tracking-wide relative">
-                      {idx !== 3 && <div className="absolute left-[9px] top-4 w-[2px] h-6 bg-theme-tertiary -z-10" />}
+                    <div key={s.id} className="flex items-center gap-6 text-xs font-black tracking-[0.1em] relative">
+                      {idx !== 3 && <div className="absolute left-[11px] top-5 w-[2px] h-8 bg-white/5 -z-10" />}
 
-                      <div className="relative z-10 w-5 h-5 rounded-full flex items-center justify-center border transition-all duration-300 bg-theme-secondary border-theme-tertiary">
-                         <div className="w-2.5 h-2.5 rounded-full bg-accent absolute inset-0 m-auto opacity-0" style={{ animation: `premiumFadeIn 0.2s forwards ${s.delay}s` }} />
-                         <div className="w-2.5 h-2.5 rounded-full bg-accent absolute inset-0 m-auto animate-ping" style={{ animationDelay: `${s.delay}s`, animationDuration: '2s' }} />
+                      <div className="relative z-10 w-6 h-6 rounded-full flex items-center justify-center border-2 transition-all duration-300 bg-[#0a0a0f] border-white/10">
+                         <div className="w-3 h-3 rounded-full bg-accent absolute inset-0 m-auto opacity-0" style={{ animation: `premiumFadeIn 0.2s forwards ${s.delay}s`, boxShadow: '0 0 10px #e53935' }} />
+                         <div className="w-3 h-3 rounded-full bg-accent absolute inset-0 m-auto animate-ping" style={{ animationDelay: `${s.delay}s`, animationDuration: '2s' }} />
                       </div>
-                      <span className="text-theme-secondary flex-1 opacity-50" style={{ animation: `premiumColorShift 0.5s forwards ${s.delay}s` }}>
+                      <span className="text-theme-secondary flex-1 opacity-40 uppercase" style={{ animation: `premiumColorShift 0.5s forwards ${s.delay}s` }}>
                         {s.text}
                       </span>
                     </div>
                   ))}
                 </div>
-                {/* Embedded style for the sequence faking */}
                 <style>{`
                   @keyframes premiumFadeIn { to { opacity: 1; } }
-                  @keyframes premiumColorShift { to { opacity: 1; color: var(--color-theme-primary); } }
+                  @keyframes premiumColorShift { to { opacity: 1; color: #fff; text-shadow: 0 0 10px rgba(255,255,255,0.5); } }
                 `}</style>
               </motion.div>
             )}

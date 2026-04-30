@@ -1,6 +1,24 @@
 @import "tailwindcss";
 @import "./styles/theme.css";
 
+/* ── View Transition: clean circle reveal ──────────────────────────────── */
+
+::view-transition-old(root) {
+  animation: none;
+  z-index: 1;
+}
+
+::view-transition-new(root) {
+  animation: vt-reveal 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  z-index: 2;
+}
+
+@keyframes vt-reveal {
+  from { clip-path: circle(0px at var(--vt-x, 50%) var(--vt-y, 50%)); }
+  to   { clip-path: circle(200% at var(--vt-x, 50%) var(--vt-y, 50%)); }
+}
+
+
 /* ============================================
    SMART SUPPLY CHAIN - DESIGN SYSTEM
    ============================================ */
@@ -74,9 +92,10 @@ html {
    ============================================ */
 
 .glass {
-  background: var(--glass-bg);
-  backdrop-filter: blur(12px);
-  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(20px) saturate(1.8);
+  -webkit-backdrop-filter: blur(20px) saturate(1.8);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .gradient-primary {

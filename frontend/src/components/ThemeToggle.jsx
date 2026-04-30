@@ -1,14 +1,21 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Sun, Moon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTheme } from '../context/ThemeContext';
 
 const ThemeToggle = () => {
   const { theme, toggleTheme } = useTheme();
+  const btnRef = useRef(null);
+
+  const handleClick = () => {
+    const rect = btnRef.current?.getBoundingClientRect();
+    toggleTheme(rect);
+  };
 
   return (
     <button
-      onClick={toggleTheme}
+      ref={btnRef}
+      onClick={handleClick}
       className="p-2 rounded-xl bg-theme-secondary border border-theme hover:bg-theme-tertiary transition-all duration-200 cursor-pointer overflow-hidden relative"
       aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
     >
