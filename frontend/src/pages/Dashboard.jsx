@@ -405,12 +405,7 @@ const Dashboard = memo(function Dashboard() {
         />
       </div>
 
-      {/* Charts row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
-        <RiskDonutChart riskCounts={data?.risk_counts || {}} />
-        <StatusFlowBar  statusCounts={data?.status_counts || {}} />
-      </div>
-
+      {/* Live Shipment Tracking Map */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -527,7 +522,7 @@ const Dashboard = memo(function Dashboard() {
           </MapContainer>
 
           {/* Live summary overlay */}
-          <div className="absolute top-4 right-4 bg-theme-secondary/80 dark:bg-[#0a0a0f]/85 backdrop-blur-2xl p-4 rounded-2xl w-56 z-[1000] border border-white/10 text-xs shadow-2xl overflow-hidden shimmer">
+          <div className="absolute top-4 right-4 bg-theme-secondary/80 dark:bg-[#0a0a0f]/85 backdrop-blur-2xl p-4 rounded-2xl w-56 z-[1000] border border-theme shadow-2xl overflow-hidden shimmer">
             <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent pointer-events-none" />
             <h3 className="font-black mb-3 text-theme-primary tracking-tight uppercase text-[10px] opacity-70">Network Intelligence</h3>
             {fetchingIncidents > 0 && (
@@ -565,6 +560,13 @@ const Dashboard = memo(function Dashboard() {
           </div>
         </div>
       </motion.div>
+
+      {/* Charts row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+        <RiskDonutChart riskCounts={data?.risk_counts || {}} />
+        <StatusFlowBar  statusCounts={data?.status_counts || {}} />
+      </div>
+
       {/* Intel Feed + Radar row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
         <LiveIntelFeed recentAlerts={data?.recent_alerts || []} />
