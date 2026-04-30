@@ -80,7 +80,7 @@ graph TD
 ### 2. Multi-Vector Rerouting
 ```mermaid
 graph LR
-    T[TomTom(Road Incidents)] & M[Mappls(Improved Routing)] & G[Gemini(Routing Annomly detection)] --> Decision{Logic}
+    T[TomTom - Road Incidents ] & M[Mappls - Improved Routing] & G[Gemini - Routing Annomly detection] --> Decision{Logic}
     Decision --> R1[Avoidance] & R2[Recommended] & R3[AI Bypass]
     style G fill:#4285f4,color:#fff
 ```
