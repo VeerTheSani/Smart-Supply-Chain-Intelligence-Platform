@@ -46,164 +46,43 @@ Create Shipment → Geocode → Route (Mappls) → Risk Engine (5 Factors)
 
 ---
 
-## ⚙️ Tech Stack
-
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| **Backend** | FastAPI (Python 3.12, async) | REST API + WebSocket server |
-| **Database** | MongoDB Atlas (Motor async driver) | Persistent shipment, risk, notification storage |
-| **Frontend** | React 19 + Vite + TailwindCSS | Glassmorphic dashboard with dark/light themes |
-| **Maps** | Leaflet + React-Leaflet | Interactive shipment tracking visualization |
-| **Real-time** | Native WebSockets + APScheduler | Live alerts, countdown timers, GPS updates |
-| **Routing** | Mappls (MapmyIndia) API | OAuth2 routing, real-time traffic, alternatives |
-| **Weather** | Open-Meteo API | Time-aware hourly forecasts per waypoint |
-| **Road Intel** | Gemini 2.5 Flash + Google Search Grounding | Real-time road disturbance detection |
-| **Incidents** | TomTom Traffic API | Live road incidents (accidents, closures, jams) |
-| **Geocoding** | Nominatim (OSM) | Free place name ↔ coordinate resolution |
-| **State Mgmt** | Zustand + React Query | Client-side stores + server-state cache |
-| **Animations** | Framer Motion | Micro-interactions, page transitions |
-
 ---
 
-## ✨ Core Features
+## 🚀 Core Intelligence Features
 
-### 1. 🗺️ Intelligent Shipment Creation
-- Geocode origin, destination, and up to 5 intermediate **via points** (waypoints)
-- Each waypoint supports configurable **dwell time** (stop duration: 15 min – 2 hr) for loading/unloading
-- Dwell times are factored into the total ETA calculation, not just travel time
-- Shipments can declare **upstream dependencies** — "this shipment can only depart after shipment X arrives"
-- Auto-reroute toggle enables autonomous decision-making on HIGH/CRITICAL risk
+| Feature | Description | Engine |
+| :--- | :--- | :--- |
+| **Preemptive Detection** | Web-grounded AI analysis of road disturbances (strikes, storms, closures). | Gemini 2.5 Flash |
+| **Dynamic Rerouting** | Autonomous 120s countdown for HIGH-risk shipments with 3 alternatives. | Mappls + Custom Logic |
+| **Cascading Logic** | BFS traversal to propagate delays across dependent supply chains. | Python Cascade Engine |
+| **Scenario Lab** | What-if simulation sandbox with high-fidelity disruption injection. | Scenario Factory |
+| **Glass Control Tower** | Real-time WebSocket feed with 60px blur premium aesthetics. | React 19 + Framer |
 
-### 2. 🧮 5-Factor Weighted Risk Engine
-Risk is calculated across **5 independent factors** with weighted contributions:
-
-```
-Final Score = (Weather × 35%) + (Events × 25%) + (Traffic × 20%)
-            + (Time Buffer × 15%) + (Historical × 5%)
-```
-
-| Factor | Weight | Source | What It Measures |
-|--------|--------|--------|-----------------|
-| **Weather** | 35% | Open-Meteo | Rain, wind speed, visibility at each waypoint at the truck's **estimated arrival time** (not current weather) |
-| **Events** | 25% | TomTom Traffic | Live road incidents — accidents, closures, flooding, road works — matched to a 200m corridor around the route |
-| **Traffic** | 20% | Mappls | Real-time duration vs free-flow ratio (1.0x = clear, 2.0x+ = gridlock) |
-| **Time Buffer** | 15% | Calculated | How much of the journey has elapsed vs expected ETA (overdue = high risk) |
-| **Major Incident/News** | 5% | Gemini 2.5 Flash | AI-powered web search for strikes, protests, road closures along route cities |
-
-**Risk Levels:** `LOW` (0–30) · `MEDIUM` (30–60) · `HIGH` (60–85) · `CRITICAL` (85–100)
-
-### 3. 🔄 Autonomous Rerouting Engine
-When risk escalates to HIGH or CRITICAL:
-1. **120-second countdown** begins (broadcast live via WebSocket)
-2. System computes up to **5 alternative routes**:
-   - **Recommended** — best balance of risk vs travel time
-   - **Fastest** — shortest duration
-   - **Safest** — lowest risk score
-   - **Avoidance** — routes around specific TomTom-detected incidents
-   - **Gemini Route** — AI-suggested bypass via a safe city (geocoded from Gemini's recommendation)
-3. If user doesn't cancel within 120s → **auto-executes** the Recommended route
-4. On CRITICAL risk, the **Gemini Route** (if available) is preferred over Recommended
-
-### 4. 🔗 Cascade Dependency Graph
-- Shipments can form **parent → child dependency chains**
-- When a parent shipment is delayed, the delay **recursively propagates** to all downstream children (BFS traversal, max depth 5)
-- Each child's `scheduled_departure` is shifted by the accumulated delay
-- Cascade alerts are broadcast via WebSocket in real time
-- The **CascadePanel** UI component visualizes the dependency tree with delay exposure hours
-
-### 5. ⏱️ Dwell Time & ETA Breakdown
-- Each via point has an optional `stop_duration_minutes` field (loading/unloading time)
-- Total dwell time is **added to the travel duration** when computing ETA
-- The backend uses **Mappls leg durations** to compute per-waypoint ETA breakdowns
-- Each via point stores its own `eta_arrival` timestamp
-- The **ShipmentDetailPanel** renders a full visual timeline:
-  - 🟢 Origin Node (with departure time)
-  - 🔵 Via Nodes (with ETA + orange dwell badges)
-  - 🔴 Target Destination (with final ETA)
-
-### 6. 🧪 Scenario Lab (What-If Simulator)
-A sandboxed simulation environment that **never touches production data**:
-- Select any active shipment → inject a disruption (Storm / Traffic / Blockage) at Low / Medium / High severity
-- Runs through the **real risk engine** pipeline with scenario overrides
-- Computes alternative routes with AI scoring
-- Shows Human vs AI decision comparison (delay reduction %, risk reduction)
-- 10-second countdown with Accept / Cancel controls
-- All simulation state stored in `simulation_decisions` collection (separate from production `decisions`)
-
-### 7. 🔔 Real-Time Notification System
-Multi-channel alert system with intelligent delivery:
-
-| Alert Type | Trigger | Severity |
-|-----------|---------|----------|
-| `risk_alert` | Risk level changed | Matches risk level |
-| `countdown_started` | Auto-reroute countdown begins | High |
-| `reroute_executed` | Route automatically changed | Critical |
-| `cascade_alert` | Downstream shipment delayed | High |
-| `gps_stuck` | GPS hasn't moved for 15+ min | High |
-| `api_failure` | External API (weather/Gemini) failed | Medium |
-| `road_disturbance` | Gemini detected road closure/protest | Critical/High |
-
-**Delivery channels:**
-- Toast popups (bottom-right, auto-dismiss by severity)
-- Desktop notifications (critical/high only)
-- Sound alerts (configurable volume)
-- Notification panel (persistent history with snooze/acknowledge)
-- All alerts carry a `source` field (`REAL_SYSTEM` vs `SIMULATOR`) — frontend never mixes them
-
-### 8. 🗺️ Live Map Visualization
-- Leaflet-based map with real-time truck position tracking
-- Route polylines decoded from Mappls geometry
-- Road incident markers (TomTom) with severity icons
-- Disruption zones visualized during Scenario Lab simulations
-- 5x hyper-lapse GPS simulation for demo purposes
-
-### 9. 📊 Analytics Dashboard
-- Aggregated stats: total shipments, active, risk distribution
-- Risk history charts per shipment
-- Conditions monitoring (weather, traffic)
-- Single API call (`/api/dashboard`) for all dashboard data
+### 🧮 The 5-Factor Risk Radar
+The system calculates a weighted risk score ($0 \rightarrow 100$) every 5 minutes:
+*   **35% Weather** (Open-Meteo) · **25% AI Intel** (Gemini) · **20% Traffic** (Mappls)
+*   **15% Time Buffer** (Projected ETA) · **5% Historical Patterns**
 
 ---
 
 ## 📐 Intelligent Workflows
 
 ### 1. Cascading Propagation Logic
-The system prevents "blind delays" by recursively calculating how a single disruption affects the entire downstream chain.
-
 ```mermaid
 graph TD
-    A[Lead Shipment Delayed] -->|Detect| B(Propagation Engine)
-    B -->|BFS Traversal| C{Dependency Graph}
-    C -->|Recursive Shift| D[Shipment B: Departure Locked]
-    C -->|Recursive Shift| E[Shipment C: Buffer Consumed]
-    D -->|Accumulated Delay| F[End-to-End Visibility]
-    E -->|Accumulated Delay| F
-    style A fill:#ef4444,stroke:#333,stroke-width:2px,color:#fff
-    style F fill:#3b82f6,stroke:#333,stroke-width:2px,color:#fff
+    A[Lead Delay] -->|BFS| B(Cascade Engine)
+    B -->|Shift| C[Child A: Locked]
+    B -->|Shift| D[Child B: At Risk]
+    C & D --> E[Systemic Visibility]
+    style A fill:#ef4444,color:#fff
 ```
 
-### 2. Multi-Vector Rerouting Decision
-When risk escalates, the system computes distinct alternatives based on multifaceted telemetry.
-
+### 2. Multi-Vector Rerouting
 ```mermaid
 graph LR
-    subgraph "Risk Detection"
-    T[TomTom Incidents]
-    M[Mappls Traffic]
-    G[Gemini AI Intel]
-    end
-
-    T & M & G --> Decision{Decision Engine}
-
-    Decision -->|Avoidance| R1[Bypass TomTom Corridor]
-    Decision -->|Recommended| R2[Balanced Risk/Time Route]
-    Decision -->|Gemini Bypass| R3[AI-Suggested Safe City Route]
-
-    R3 -->|Geocode| GC[Gemini Safe Waypoint]
-    GC -->|Re-Route| EXEC[Dynamic Update]
-    
-    style G fill:#4285f4,stroke:#333,stroke-width:2px,color:#fff
-    style R3 fill:#8b5cf6,stroke:#333,stroke-width:2px,color:#fff
+    T[TomTom] & M[Mappls] & G[Gemini] --> Decision{Logic}
+    Decision --> R1[Avoidance] & R2[Recommended] & R3[AI Bypass]
+    style G fill:#4285f4,color:#fff
 ```
 
 ---
@@ -295,6 +174,7 @@ frontend/src/
 ```
 
 ---
+
 
 ## 🚀 Quick Start
 
@@ -550,8 +430,8 @@ The platform enforces strict separation between production and simulation:
 
 | Name | Role |
 |------|------|
-| **Veer** | Backend — FastAPI, risk engine, Mappls, Gemini, scheduler, cascade engine |
-| **Nandani** | Frontend — React, Leaflet map, dashboard, WebSocket, UI/UX | Simulation & backend assistance |
+| **Veer** | Backend — FastAPI, Risk Engine, Mappls, Gemini, Scheduler, Cascade Engine |
+| **Nandani** | Frontend — React, Leaflet Map, Dashboard, WebSocket, UI/UX | Simulation & Backend Assistance |
 
 ---
 
