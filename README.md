@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/MongoDB-47A248?style=for-the-badge&logo=mongodb&logoColor=white" />
   <img src="https://img.shields.io/badge/Gemini_2.5_Flash-4285F4?style=for-the-badge&logo=google&logoColor=white" />
   <img src="https://img.shields.io/badge/Mappls-FF5722?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/UI_Aesthetic-Glassmorphism-purple?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/WebSockets-010101?style=for-the-badge&logo=socketdotio&logoColor=white" />
 </p>
 
 ---
@@ -80,7 +80,7 @@ graph TD
 ### 2. Multi-Vector Rerouting
 ```mermaid
 graph LR
-    T[TomTom] & M[Mappls] & G[Gemini] --> Decision{Logic}
+    T[TomTom - Road Incidents ] & M[Mappls - Improved Routing] & G[Gemini - Routing Annomly detection] --> Decision{Logic}
     Decision --> R1[Avoidance] & R2[Recommended] & R3[AI Bypass]
     style G fill:#4285f4,color:#fff
 ```
