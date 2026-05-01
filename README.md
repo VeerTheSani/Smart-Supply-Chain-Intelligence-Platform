@@ -56,7 +56,9 @@ Create Shipment → Geocode → Route (Mappls) → Risk Engine (5 Factors)
 | **Dynamic Rerouting** | Autonomous 120s countdown for HIGH-risk shipments with 3 alternatives. | Mappls + Custom Logic |
 | **Cascading Logic** | BFS traversal to propagate delays across dependent supply chains. | Python Cascade Engine |
 | **Scenario Lab** | What-if simulation sandbox with high-fidelity disruption injection. | Scenario Factory |
-| **Glass Control Tower** | Real-time WebSocket feed with 60px blur premium aesthetics. | React 19 + Framer |
+| **Real-Time Alerts** | Real-time WebSocket | FastAPI + Python || **Incident Monitoring** | Real-time road incident tracking (accidents, closures, floods). | TomTom Traffic API |
+| **GPS Simulation** | Interpolated movement simulation for real-time tracking. | Python Interpolation |
+
 
 ### 🧮 The 5-Factor Risk Radar
 The system calculates a weighted risk score ($0 \rightarrow 100$) every 5 minutes:
