@@ -150,6 +150,75 @@ const getViaIcon = (type) => {
 
 import polyline from '@mapbox/polyline';
 
+const ConnectorLine = ({ selectedShipment, liveLocation }) => {
+  const map = useMap();
+  const [points, setPoints] = useState(null);
+
+  useEffect(() => {
+    if (!selectedShipment || !liveLocation) {
+      setPoints(null);
+      return;
+    }
+
+    const updatePoints = () => {
+      const markerPoint = map.latLngToContainerPoint(liveLocation);
+      
+      // Sidebar is 288px wide (w-72) + 16px left (left-4) = 304px
+      const panelX = 304;
+      // Vertically center on the panel's "Focus Active" header (~60px from top)
+      const panelY = 60; 
+
+      // Create a "circuit board" style stepped path
+      // 1. Horizontal out from panel
+      // 2. Vertical to match marker Y
+      // 3. Horizontal to marker
+      const midX = (panelX + markerPoint.x) / 2;
+
+      setPoints(`M ${panelX} ${panelY} H ${midX} V ${markerPoint.y} H ${markerPoint.x}`);
+    };
+
+    updatePoints();
+    map.on('move zoom', updatePoints);
+    const interval = setInterval(updatePoints, 50); // High frequency for smooth truck tracking
+
+    return () => {
+      map.off('move zoom', updatePoints);
+      clearInterval(interval);
+    };
+  }, [selectedShipment, liveLocation, map]);
+
+  if (!points) return null;
+
+  return (
+    <svg className="absolute inset-0 pointer-events-none z-[1000] w-full h-full overflow-visible">
+      <defs>
+        <filter id="glow">
+          <feGaussianBlur stdDeviation="2.5" result="coloredBlur"/>
+          <feMerge>
+            <feMergeNode in="coloredBlur"/>
+            <feMergeNode in="SourceGraphic"/>
+          </feMerge>
+        </filter>
+      </defs>
+      <path
+        d={points}
+        fill="none"
+        stroke="var(--accent)"
+        strokeWidth="1.5"
+        strokeOpacity="0.4"
+        style={{ filter: 'url(#glow)' }}
+        className="animate-pulse"
+      />
+      <circle
+        cx={304}
+        cy={60}
+        r="3"
+        fill="var(--accent)"
+      />
+    </svg>
+  );
+};
+
 const AnimatedLiveTruck = memo(function AnimatedLiveTruck({ shipment, isSelected, theme, riskLevel, isHigh, isMed, etaDelay, delayClass, onClick }) {
   const [liveLocation, setLiveLocation] = useState(null);
 
@@ -235,6 +304,7 @@ const AnimatedLiveTruck = memo(function AnimatedLiveTruck({ shipment, isSelected
       eventHandlers={{ click: onClick }}
       zIndexOffset={isSelected ? 1000 : 0}
     >
+      {isSelected && <ConnectorLine selectedShipment={shipment} liveLocation={liveLocation} />}
       <Tooltip direction="top" offset={[0, -10]} opacity={1}>
         <div className="text-xs font-bold">
           🚚 {shipment.tracking_number}
@@ -245,72 +315,20 @@ const AnimatedLiveTruck = memo(function AnimatedLiveTruck({ shipment, isSelected
         </div>
       </Tooltip>
 
-      <Popup className="custom-popup">
-        <div className="flex flex-col gap-3 min-w-[240px] py-1">
-          {/* Header with Tracking ID */}
-          <div className="flex items-center justify-between">
-            <span className="text-lg font-black tracking-tight text-theme-primary">
-              {shipment.tracking_number}
-            </span>
-          </div>
-
-          {/* Route Info */}
-          <div className="space-y-1">
-            <p className="text-[10px] uppercase font-bold tracking-widest text-theme-secondary opacity-60">Route</p>
-            <p className="text-xs font-medium text-theme-primary leading-tight">
-              {shipment.origin_name} <span className="text-accent mx-1">→</span> {shipment.destination_name}
-            </p>
-          </div>
-
-          {/* Status Pills */}
-          <div className="flex items-center gap-2">
-            <div className={`px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1.5 ${isHigh ? "bg-danger/20 text-danger border border-danger/30" : isMed ? "bg-warning/20 text-warning border border-warning/30" : "bg-success/20 text-success border border-success/30"}`}>
-              <div className={`w-1.5 h-1.5 rounded-full ${isHigh ? "bg-danger" : isMed ? "bg-warning" : "bg-success"}`} />
-              Risk: {riskLevel}
-            </div>
-            <div className={`px-2 py-1 rounded-lg text-[10px] font-bold border ${delayClass.replace('text-', 'text-').replace('bg-', 'bg-').split(' ').map(c => c.includes('/') ? c : c+'/20').join(' ')}`}>
-              ETA: {etaDelay}
-            </div>
-          </div>
-
-          {/* Alert / Reason Section - Red Box Style */}
-          {((shipment.route_incidents?.length || 0) > 0 || (incidentOverride[shipment.id]?.length || 0) > 0 || shipment.risk?.current?.reason) && (
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="bg-danger/15 p-3 rounded-2xl border border-danger/25 space-y-2"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="flex -space-x-1.5">
-                    {[...Array(Math.min(3, (shipment.route_incidents?.length || incidentOverride[shipment.id]?.length || 0) || 1))].map((_, i) => (
-                      <div key={i} className="w-5 h-5 rounded-full bg-danger border-2 border-[#1a1a25] flex items-center justify-center text-[10px] text-white shadow-lg">⚠️</div>
-                    ))}
-                  </div>
-                  <span className="text-[10px] font-black text-danger uppercase tracking-tighter">
-                    {((shipment.route_incidents?.length || incidentOverride[shipment.id]?.length || 0)) || 1} System Event{((shipment.route_incidents?.length || incidentOverride[shipment.id]?.length || 0)) > 1 ? 's' : ''}
-                  </span>
-                </div>
-              </div>
-              
-              <p className="text-[11px] text-danger/90 font-bold leading-tight">
-                {shipment.risk?.current?.reason && !shipment.risk.current.reason.toLowerCase().includes('unavailable') 
-                  ? shipment.risk.current.reason 
-                  : "Critical delay risks and route disruptions detected on primary path."}
-              </p>
-            </motion.div>
-          )}
-        </div>
-      </Popup>
     </Marker>
   );
 });
+
+import { AnimatePresence } from 'framer-motion';
+import { X, CloudRain, Clock, MapPin, ShieldAlert, Sparkles, AlertCircle } from 'lucide-react';
 
 const Dashboard = memo(function Dashboard() {
   const { theme } = useTheme();
   const [selectedId, setSelectedId] = useState(null);
   const [incidentOverride, setIncidentOverride] = useState({});
   const [fetchingIncidents, setFetchingIncidents] = useState(0);
+
+  const selectedShipment = useShipmentStore(state => state.shipments.find(s => s.id === selectedId));
 
   const { data, isLoading, error } = useDashboard();
   const { isLoading: shipmentsLoading } = useShipments();
@@ -431,10 +449,10 @@ const Dashboard = memo(function Dashboard() {
             style={{ height: "100%", width: "100%", zIndex: 0 }}
           >
             <TileLayer
-              attribution={theme === 'dark' ? '&copy; <a href="https://carto.com/">CartoDB</a>' : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}
+              attribution={theme === 'dark' ? '&copy; <a href="https://carto.com/">CartoDB</a>' : '&copy; <a href="https://carto.com/">CartoDB</a>'}
               url={theme === 'dark'
                 ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-                : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"}
+                : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"}
             />
 
             <FitBounds shipments={shipments} />
@@ -521,10 +539,137 @@ const Dashboard = memo(function Dashboard() {
             })}
           </MapContainer>
 
-          {/* Live summary overlay */}
+          </div>
+
+          {/* ── Left Side Floating Panel (As requested in black pen sketch) ── */}
+          <AnimatePresence>
+            {selectedShipment && (
+              <motion.div
+                initial={{ opacity: 0, x: -100, scale: 0.95 }}
+                animate={{ opacity: 1, x: 0, scale: 1 }}
+                exit={{ opacity: 0, x: -100, scale: 0.95 }}
+                className="absolute top-4 bottom-4 left-4 w-72 z-[1001] pointer-events-none"
+              >
+                <div className="h-full w-full pointer-events-auto bg-theme-secondary/90 dark:bg-[#0a0a0f]/90 backdrop-blur-2xl rounded-2xl border border-theme shadow-[0_20px_50px_rgba(0,0,0,0.5)] flex flex-col overflow-hidden">
+                  {/* Top Bar with shimmer */}
+                  <div className="absolute top-0 inset-x-0 h-[2px] bg-gradient-to-r from-transparent via-accent to-transparent opacity-50" />
+                  
+                  {/* Header */}
+                  <div className="px-5 py-4 border-b border-theme flex items-center justify-between bg-theme-tertiary/20">
+                    <div>
+                      <h3 className="text-[10px] font-black uppercase tracking-widest text-theme-secondary mb-0.5">Focus Active</h3>
+                      <p className="text-base font-black text-theme-primary leading-none">{selectedShipment.tracking_number}</p>
+                    </div>
+                    <button 
+                      onClick={() => setSelectedId(null)}
+                      className="p-1.5 hover:bg-theme-tertiary rounded-lg transition-colors cursor-pointer"
+                    >
+                      <X className="w-4 h-4 text-theme-secondary" />
+                    </button>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto p-5 space-y-5 custom-scrollbar">
+                    {/* Location Info */}
+                    <div className="space-y-3">
+                       <div className="flex items-start gap-3">
+                         <div className="mt-1 w-2 h-2 rounded-full bg-success ring-4 ring-success/20 shrink-0" />
+                         <div>
+                            <p className="text-[10px] font-bold text-theme-secondary uppercase tracking-wide">Origin</p>
+                            <p className="text-xs font-bold text-theme-primary leading-tight">{selectedShipment.origin_name}</p>
+                         </div>
+                       </div>
+                       <div className="ml-1 w-px h-4 bg-theme-tertiary" />
+                       <div className="flex items-start gap-3">
+                         <div className="mt-1 w-2 h-2 rounded-full bg-accent ring-4 ring-accent/20 shrink-0" />
+                         <div>
+                            <p className="text-[10px] font-bold text-theme-secondary uppercase tracking-wide">Destination</p>
+                            <p className="text-xs font-bold text-theme-primary leading-tight">{selectedShipment.destination_name}</p>
+                         </div>
+                       </div>
+                    </div>
+
+                    {/* Status Stats Grid */}
+                    <div className="grid grid-cols-2 gap-2">
+                       <div className="p-3 bg-theme-tertiary/40 rounded-xl border border-theme/50">
+                          <p className="text-[9px] font-bold text-theme-secondary uppercase mb-1 flex items-center gap-1">
+                            <Clock className="w-2.5 h-2.5" /> Delay
+                          </p>
+                          <p className={`text-xs font-black ${selectedShipment.risk?.current?.risk_level === 'high' ? 'text-danger' : 'text-warning'}`}>
+                            {selectedShipment.risk?.current?.risk_level === 'high' ? '+4.2h' : '+1.5h'}
+                          </p>
+                       </div>
+                       <div className="p-3 bg-theme-tertiary/40 rounded-xl border border-theme/50">
+                          <p className="text-[9px] font-bold text-theme-secondary uppercase mb-1 flex items-center gap-1">
+                            <ShieldAlert className="w-2.5 h-2.5" /> Risk
+                          </p>
+                          <p className={`text-xs font-black uppercase ${selectedShipment.risk?.current?.risk_level === 'high' ? 'text-danger' : 'text-success'}`}>
+                             {selectedShipment.risk?.current?.risk_level}
+                          </p>
+                       </div>
+                    </div>
+
+                    {/* Weather Update (Conditional) */}
+                    {selectedShipment.last_risk_assessment?.breakdown?.weather && (
+                      <div className="p-3.5 bg-indigo-500/10 rounded-xl border border-indigo-500/20">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-1.5">
+                            <CloudRain className="w-3 h-3" /> Weather Intel
+                          </span>
+                          <span className="text-[10px] font-bold text-indigo-300">
+                             {selectedShipment.last_risk_assessment.breakdown.weather.score}/100
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-theme-primary font-medium leading-relaxed italic">
+                          "{selectedShipment.last_risk_assessment.breakdown.weather.reason}"
+                        </p>
+                      </div>
+                    )}
+
+                    {/* System Events / Alerts */}
+                    <div className="space-y-2">
+                       <p className="text-[10px] font-black text-theme-secondary uppercase tracking-[0.2em] mb-1">Telemetry Alerts</p>
+                       {(selectedShipment.route_incidents?.length > 0 || (incidentOverride[selectedId]?.length > 0)) ? (
+                         <div className="space-y-2">
+                            {(selectedShipment.route_incidents?.length > 0 ? selectedShipment.route_incidents : (incidentOverride[selectedId] || [])).slice(0, 3).map((inc, i) => (
+                              <div key={i} className="flex gap-3 p-2 bg-danger/5 border border-danger/10 rounded-lg">
+                                <AlertCircle className="w-3.5 h-3.5 text-danger shrink-0 mt-0.5" />
+                                <div>
+                                  <p className="text-[10px] font-bold text-theme-primary capitalize">{inc.type.replace('_', ' ').toLowerCase()}</p>
+                                  <p className="text-[9px] text-theme-secondary line-clamp-1">{inc.description}</p>
+                                </div>
+                              </div>
+                            ))}
+                         </div>
+                       ) : (
+                         <div className="p-3 rounded-xl border border-dashed border-theme flex items-center justify-center gap-2">
+                            <Sparkles className="w-3 h-3 text-success" />
+                            <span className="text-[10px] font-bold text-success uppercase">All paths clear</span>
+                         </div>
+                       )}
+                    </div>
+                  </div>
+
+                  {/* Footer CTA */}
+                  <div className="p-4 bg-theme-tertiary/20 border-t border-theme">
+                    <button className="w-full py-2.5 bg-accent hover:bg-accent/80 text-white text-[11px] font-black uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-accent/20">
+                      Initiate Protocol
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Network Intelligence Summary Overlay */}
           <div className="absolute top-4 right-4 bg-theme-secondary/80 dark:bg-[#0a0a0f]/85 backdrop-blur-2xl p-4 rounded-2xl w-56 z-[1000] border border-theme shadow-2xl overflow-hidden shimmer">
             <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent pointer-events-none" />
-            <h3 className="font-black mb-3 text-theme-primary tracking-tight uppercase text-[10px] opacity-70">Network Intelligence</h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-black text-theme-primary tracking-tight uppercase text-[10px] opacity-70">Network Intelligence</h3>
+              <div className="flex items-center gap-1.5">
+                 <div className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
+                 <span className="text-[9px] font-bold text-success uppercase tracking-widest">Live</span>
+              </div>
+            </div>
             {fetchingIncidents > 0 && (
               <div className="mb-2">
                 <div className="flex justify-between text-[10px] text-theme-secondary mb-1">
@@ -558,7 +703,6 @@ const Dashboard = memo(function Dashboard() {
               ) : null;
             })()}
           </div>
-        </div>
       </motion.div>
 
       {/* Charts row */}

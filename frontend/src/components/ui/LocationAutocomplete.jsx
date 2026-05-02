@@ -61,7 +61,16 @@ export default function LocationAutocomplete({
   const handleSelect = (suggestion) => {
     const formattedName = suggestion.display_name.split(',').slice(0, 3).join(', ');
     setQuery(formattedName);
-    onChange(formattedName); // Send back to react-hook-form
+    
+    // Pass back an object with name and coordinates if available
+    onChange({
+      name: formattedName,
+      coords: {
+        lat: parseFloat(suggestion.lat),
+        lng: parseFloat(suggestion.lon)
+      }
+    });
+    
     setIsOpen(false);
   };
 
@@ -73,7 +82,7 @@ export default function LocationAutocomplete({
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
-            onChange(e.target.value); // keep form in sync even if not selected
+            onChange({ name: e.target.value, coords: null }); // keep form in sync even if not selected
           }}
           onFocus={() => { if (suggestions.length > 0) setIsOpen(true); }}
           placeholder={placeholder}

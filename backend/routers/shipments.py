@@ -151,7 +151,7 @@ async def _background_assessment_task(shipment_id_str: str):
 async def create_shipment(data: ShipmentCreate, background_tasks: BackgroundTasks):
     """
     Create a new shipment:
-    1. Geocode origin + destination (Nominatim)
+    1. Geocode origin + destination (TomTom Fallback)
     2. Get route + traffic from Mappls
     3. Reverse geocode waypoints → city names (for Gemini)
     4. Store in MongoDB

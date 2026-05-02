@@ -50,6 +50,11 @@ Roads: {roads_str}
 Passing through: {cities_str}
 Journey time: {eta_hours} hours
 
+GEOGRAPHICAL BOUNDARY: You must ONLY report incidents occurring physically along the corridor between {origin} and {destination}.
+- IGNORE disruptions on {roads_str} that are in distant states or cities not part of this route.
+- For example, if the route is Delhi → Jaipur, ignore accidents on the same highway in Mumbai or Chennai.
+- Ensure the 'location' in your response is a city or stretch that is part of the provided route segment.
+
 Search for:
 - Road closures or blockages on {roads_str}
 - Strikes, protests, bandh affecting transport
@@ -211,6 +216,12 @@ Search for disturbances on these specific highways:
 - Flooding or landslides affecting these corridors
 - Protests, bandh, or strikes specifically on these roads
 - Major accident-based closures reported in news
+
+STRICT GEOGRAPHICAL FILTER:
+1. Only report incidents located between {origin} and {destination}. 
+2. If {origin} and {destination} are in North India (e.g. Delhi, Punjab), do NOT report incidents in South India (e.g. Bangalore, Chennai) even if they are on the same highway number.
+3. Use the passing cities ({stops_str}) to verify the incident is actually on this specific route segment.
+4. If the most significant incident is outside this corridor, return score 0.
 
 Respond ONLY with this exact JSON, nothing else:
 {{

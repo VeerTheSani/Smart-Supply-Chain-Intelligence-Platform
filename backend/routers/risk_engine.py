@@ -238,7 +238,7 @@ async def _compute_historical_score(
         
         if incident_location and "unavailable" not in incident_location.lower():
             try:
-                from services.mappls_service import geocode
+                from services.geocoding_service import geocode
                 geo = await geocode(incident_location)
                 incident_coords = {"lat": geo["lat"], "lng": geo["lng"]}
             except Exception as e:

@@ -1,73 +1,94 @@
-# services/gecording_service  , converting origin name and destination into coordinates and save 
+# services/geocoding_service - converting place names to coordinates and vice versa using TomTom API
+import os
 import httpx
 import logging
+from urllib.parse import quote
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-HEADERS = {"User-Agent": "SmartSupplyChain/1.0"}  # Nominatim requires a User-Agent
-
-## givs coordinates of orign and destination by names
+TOMTOM_KEY = os.getenv("TOMTOM_KEY")
+if not TOMTOM_KEY:
+    logger.error("TOMTOM_KEY missing! Geocoding will fail.")
 
 async def geocode(place_name: str) -> dict:
+    """Convert a place name (city, address) into latitude and longitude using TomTom."""
+    if not TOMTOM_KEY:
+        raise RuntimeError("TomTom API key not configured")
 
     try:
+        # TomTom Geocode API: /search/2/geocode/{query}.json
+        url = f"https://api.tomtom.com/search/2/geocode/{quote(place_name)}.json"
+        
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
-                NOMINATIM_URL,
+                url,
                 params={
-                    "q": place_name,
-                    "format": "json",
+                    "key": TOMTOM_KEY,
                     "limit": 1,
-                    "countrycodes": "in",  # restrictng to ind for now , maybe wehen in q=wfaam we vaplafmaew f brainrot is caching up
-                },
-                headers=HEADERS,
+                    "countrySet": "IN", # Restrict to India for relevance
+                }
             )
             resp.raise_for_status()
             data = resp.json()
 
-        if not data:
+        results = data.get("results", [])
+        if not results:
             raise ValueError(f"Could not geocode '{place_name}' — place not found")
 
+        pos = results[0]["position"]
         return {
-            "lat": float(data[0]["lat"]),
-            "lng": float(data[0]["lon"]),
-            "display_name": data[0]["display_name"],
+            "lat": float(pos["lat"]),
+            "lng": float(pos["lon"]),
+            "display_name": results[0].get("address", {}).get("freeformAddress", place_name),
         }
 
     except ValueError:
         raise
     except httpx.TimeoutException:
-        logger.error(f"Nominatim timeout for '{place_name}'")
+        logger.error(f"TomTom timeout for '{place_name}'")
         raise RuntimeError(f"Geocoding timed out for '{place_name}'")
     except httpx.HTTPError as e:
-        logger.error(f"Nominatim HTTP error for '{place_name}': {e}")
+        logger.error(f"TomTom HTTP error for '{place_name}': {e}")
         raise RuntimeError(f"Geocoding failed for '{place_name}'")
 
 
 async def reverse_geocode(lat: float, lng: float) -> str:
-    """Return a short place name for coordinates (city or district level)."""
+    """Return a short place name for coordinates (city or district level) using TomTom."""
+    if not TOMTOM_KEY:
+        return f"{lat:.2f},{lng:.2f}"
+
     try:
+        # TomTom Reverse Geocode API: /search/2/reverseGeocode/{position}.json
+        url = f"https://api.tomtom.com/search/2/reverseGeocode/{lat},{lng}.json"
+        
         async with httpx.AsyncClient(timeout=6.0) as client:
             resp = await client.get(
-                "https://nominatim.openstreetmap.org/reverse",
-                params={"lat": lat, "lon": lng, "format": "json", "zoom": 10},
-                headers=HEADERS,
+                url,
+                params={"key": TOMTOM_KEY}
             )
             resp.raise_for_status()
             data = resp.json()
-        addr = data.get("address", {})
+        
+        addresses = data.get("addresses", [])
+        if not addresses:
+            return f"{lat:.2f},{lng:.2f}"
+            
+        addr = addresses[0].get("address", {})
+        
+        # Priority for display: Municipality (City) > Submunicipality > CountrySecondarySubdivision (District)
         name = (
-            addr.get("city")
-            or addr.get("town")
-            or addr.get("village")
-            or addr.get("county")
-            or addr.get("state_district")
-            or addr.get("state")
+            addr.get("municipality")
+            or addr.get("municipalitySubdivision")
+            or addr.get("countrySecondarySubdivision")
+            or addr.get("countrySubdivision")
             or f"{lat:.2f},{lng:.2f}"
         )
         return name
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Reverse geocode failed for {lat},{lng}: {e}")
         return f"{lat:.2f},{lng:.2f}"
 
 
@@ -76,8 +97,11 @@ if __name__ == "__main__":
 
     async def test():
         for place in ["Mumbai", "Delhi", "Ahmedabad", "Bangalore"]:
-            result = await geocode(place)
-            print(f"{place:12} → lat={result['lat']:.4f}, lng={result['lng']:.4f}")
-            print(f"             {result['display_name'][:60]}")
+            try:
+                result = await geocode(place)
+                print(f"{place:12} \u2192 lat={result['lat']:.4f}, lng={result['lng']:.4f}")
+                print(f"             {result['display_name']}")
+            except Exception as e:
+                print(f"Error for {place}: {e}")
 
     asyncio.run(test())

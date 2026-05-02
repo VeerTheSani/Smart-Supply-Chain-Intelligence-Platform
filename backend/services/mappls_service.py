@@ -116,71 +116,7 @@ def _extract_waypoints_every_50km(coordinates: list) -> list[dict]:
     return waypoints
 
 
-# ── Geocoding ──────────────────────────────────────────────────────────────────
 
-async def geocode(place_name: str) -> dict:
-    """
-    Convert a place name to coordinates using Mappls geocoding API.
-    Returns {"lat": float, "lng": float, "display_name": str}
-    """
-    place_name = " ".join(place_name.split())  # normalise whitespace
-    token = await get_token()
-
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://atlas.mappls.com/api/places/geocode",
-                params={"address": place_name},
-                headers={"Authorization": f"Bearer {token}"}
-            )
-            if resp.status_code != 200:
-                logger.error(f"Mappls geocode HTTP {resp.status_code} for '{place_name}': {resp.text[:200]}")
-                return {"lat": 28.6139, "lng": 77.2090, "display_name": f"{place_name} (Fallback)"}
-            data = resp.json()
-
-        results = data.get("copResults") or []
-        if not results:
-            logger.warning(f"Mappls geocode empty results for '{place_name}'. Response: {data}")
-            return {"lat": 28.6139, "lng": 77.2090, "display_name": f"{place_name} (Fallback)"}
-
-        top = results[0]
-        return {
-            "lat":          float(top["latitude"]),
-            "lng":          float(top["longitude"]),
-            "display_name": top.get("formattedAddress", place_name),
-        }
-
-    except httpx.TimeoutException:
-        logger.error(f"Mappls geocoding timed out for '{place_name}'")
-        return {"lat": 28.6139, "lng": 77.2090, "display_name": f"{place_name} (Fallback)"}
-    except Exception as e:
-        logger.error(f"Mappls geocoding failed for '{place_name}': {type(e).__name__}: {e}. Using fallback.")
-        return {"lat": 28.6139, "lng": 77.2090, "display_name": f"{place_name} (Fallback)"}
-
-
-async def reverse_geocode(lat: float, lng: float) -> str:
-    """Return a short place name for coordinates using TomTom reverse geocoding."""
-    try:
-        async with httpx.AsyncClient(timeout=6.0) as client:
-            resp = await client.get(
-                f"https://api.tomtom.com/search/2/reverseGeocode/{lat},{lng}.json",
-                params={"key": TOMTOM_KEY, "radius": 10000}
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        addresses = data.get("addresses", [])
-        if not addresses:
-            return f"{lat:.2f},{lng:.2f}"
-        addr = addresses[0].get("address", {})
-        return (
-            addr.get("municipality")
-            or addr.get("municipalitySubdivision")
-            or addr.get("countrySecondarySubdivision")
-            or addr.get("countrySubdivision")
-            or f"{lat:.2f},{lng:.2f}"
-        )
-    except Exception:
-        return f"{lat:.2f},{lng:.2f}"
 
 
 # ── Routing + Traffic ──────────────────────────────────────────────────────────

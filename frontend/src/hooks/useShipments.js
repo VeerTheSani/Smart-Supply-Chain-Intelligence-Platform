@@ -10,7 +10,7 @@ export const useShipments = () => {
     queryKey: ['shipments'],
     queryFn: fetchShipments,
     staleTime: 5000,
-    refetchInterval: 30000,
+    refetchInterval: 10000, // Reduced from 30s to 10s for more 'live' Gemini updates
     refetchIntervalInBackground: false,
   });
 };

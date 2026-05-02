@@ -27,7 +27,9 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
 
   useEffect(() => {
     register('origin_name', { required: 'Origin city is required' });
+    register('origin_coords');
     register('destination_name', { required: 'Destination city is required' });
+    register('destination_coords');
   }, [register]);
 
   useEffect(() => {
@@ -49,7 +51,12 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
   const addViaPoint = () => setViaPoints(prev => prev.length < 5 ? [...prev, { location_name: '', type: 'pickup', stop_duration_minutes: 0 }] : prev);
   const updateViaPoint = (index, field, value) => setViaPoints(prev => {
      const next = [...prev];
-     next[index][field] = value;
+     if (field === 'location_data') {
+       next[index].location_name = value.name;
+       next[index].coords = value.coords;
+     } else {
+       next[index][field] = value;
+     }
      return next;
   });
   const removeViaPoint = (index) => setViaPoints(prev => prev.filter((_, i) => i !== index));
@@ -59,7 +66,9 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
       await createMutation.mutateAsync({
         shipment_name: data.shipment_name,
         origin_name: data.origin_name,
+        origin_coords: data.origin_coords,
         destination_name: data.destination_name,
+        destination_coords: data.destination_coords,
         via_points: viaPoints.filter(vp => vp.location_name.trim() !== '').map(vp => ({
           ...vp,
           stop_duration_minutes: Number(vp.stop_duration_minutes) || 0
@@ -86,13 +95,13 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-theme-primary/80 transition-all">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-theme-primary/40 backdrop-blur-md transition-all">
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             transition={{ duration: 0.2 }}
-            className="bg-theme-secondary rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl border border-theme flex flex-col relative custom-scrollbar"
+            className="bg-theme-secondary/90 dark:bg-[#0a0a0f]/90 backdrop-blur-2xl rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl border border-theme flex flex-col relative custom-scrollbar"
           >
             {/* Header */}
             <div className="p-4 sm:p-6 border-b border-theme flex items-center justify-between bg-theme-tertiary/30">
@@ -145,7 +154,10 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
                   <LocationAutocomplete
                     placeholder="Search origin city..."
                     value={watch('origin_name')}
-                    onChange={(val) => setValue('origin_name', val, { shouldValidate: true })}
+                    onChange={(val) => {
+                      setValue('origin_name', val.name, { shouldValidate: true });
+                      setValue('origin_coords', val.coords);
+                    }}
                     error={errors.origin_name}
                   />
                   {errors.origin_name && (
@@ -160,7 +172,7 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
                         <LocationAutocomplete
                            placeholder={`Via Stop ${index + 1}...`}
                            value={vp.location_name}
-                           onChange={(val) => updateViaPoint(index, 'location_name', val)}
+                           onChange={(val) => updateViaPoint(index, 'location_data', val)}
                         />
                      </div>
                      <select 
@@ -211,7 +223,10 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
                   <LocationAutocomplete
                     placeholder="Search destination city..."
                     value={watch('destination_name')}
-                    onChange={(val) => setValue('destination_name', val, { shouldValidate: true })}
+                    onChange={(val) => {
+                      setValue('destination_name', val.name, { shouldValidate: true });
+                      setValue('destination_coords', val.coords);
+                    }}
                     error={errors.destination_name}
                   />
                   {errors.destination_name && (
@@ -328,7 +343,7 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
                 initial={{ opacity: 0 }} 
                 animate={{ opacity: 1 }} 
                 exit={{ opacity: 0 }}
-                className="absolute inset-0 z-50 bg-[#0a0a0f]/90 backdrop-blur-[60px] flex flex-col items-center justify-center p-10 border border-white/10"
+                className="absolute inset-0 z-50 bg-[#0a0a0f]/80 backdrop-blur-3xl flex flex-col items-center justify-center p-10 border border-white/10"
               >
                 <div className="relative w-24 h-24 mb-10">
                    <div className="absolute inset-0 rounded-full border-[6px] border-white/5" />

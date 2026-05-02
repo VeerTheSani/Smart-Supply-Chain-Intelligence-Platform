@@ -3,21 +3,16 @@
 # Called once at shipment creation — results stored in MongoDB.
 # Gives Gemini real place names instead of random coordinates.
 
-import httpx
 import asyncio
 import logging
+from services.geocoding_service import reverse_geocode
 
 logger = logging.getLogger(__name__)
-
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
-HEADERS = {"User-Agent": "SmartSupplyChain/1.0"}
-
-
 
 async def get_named_waypoints(waypoints: list[dict]) -> list[dict]:
     """
     Take raw waypoints (lat/lng) and add city names via reverse geocoding.
-    Runs all reverse geocode calls concurrently for speed.
+    Runs reverse geocode calls with a slight delay to respect TomTom's QPS limits.
 
     Input:  [{"lat": 21.49, "lng": 72.92}, ...]
     Output: [{"lat": 21.49, "lng": 72.92, "city": "Bharuch"}, ...]
@@ -25,13 +20,17 @@ async def get_named_waypoints(waypoints: list[dict]) -> list[dict]:
     async def enrich(wp, delay: float = 0):
         if delay:
             await asyncio.sleep(delay)
-        city = await _reverse_geocode(wp["lat"], wp["lng"])
-        return {**wp, "city": city or f"{wp['lat']:.2f},{wp['lng']:.2f}"}
+        # Use the centralized TomTom-backed geocoding service
+        city = await reverse_geocode(wp["lat"], wp["lng"])
+        return {**wp, "city": city}
 
+    # TomTom free tier usually allows ~5 QPS. 
+    # We use a 0.2s stagger to stay within limits during bulk waypoint resolution.
     results = await asyncio.gather(*[
-        enrich(wp, delay=i * 0.5)   # 0.5s between each call ebcause this stupid nomiantion is hititng god damn limit 
+        enrich(wp, delay=i * 0.2) 
         for i, wp in enumerate(waypoints)
     ])
+    return results
 
 
 def get_city_names(named_waypoints: list[dict]) -> list[str]:
@@ -86,7 +85,10 @@ def get_cities_ahead(
 if __name__ == "__main__":
     import asyncio
     import sys
-    sys.path.append("..")
+    import os
+
+    # Fix path for local execution
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from services.mappls_service import get_route
 
     async def test():
@@ -98,7 +100,7 @@ if __name__ == "__main__":
         waypoints = route["waypoints"]
 
         print(f"\nRaw waypoints: {len(waypoints)}")
-        print("Reverse geocoding to get city names...\n")
+        print("Reverse geocoding (TomTom) to get city names...\n")
 
         named = await get_named_waypoints(waypoints)
 
