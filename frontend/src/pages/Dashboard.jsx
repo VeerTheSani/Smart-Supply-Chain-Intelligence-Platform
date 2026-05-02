@@ -17,6 +17,7 @@ import iconShadow from 'leaflet/dist/images/marker-shadow.png';
 import RoadRoute from '../components/ui/RoadRoute';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import ErrorFallback from '../components/ui/ErrorFallback';
+import { cn } from '../lib/utils';
 
 let DefaultIcon = L.icon({
   iconUrl: icon,
@@ -466,7 +467,6 @@ const Dashboard = memo(function Dashboard() {
               const isHigh = riskLevel === "high" || riskLevel === "critical";
               const isMed = riskLevel === "medium";
               const isSelected = selectedId === shipment.id;
-              const opacity = selectedId && !isSelected ? 0.4 : 1;
               const etaDelay = isHigh ? "+4h Delay" : isMed ? "+1.5h Delay" : "On Time";
               const delayClass = isHigh ? "text-danger bg-danger/10" : isMed ? "text-warning bg-warning/10" : "text-success bg-success/10";
 
@@ -512,7 +512,7 @@ const Dashboard = memo(function Dashboard() {
                     onClick={() => handleMarkerClick(shipment.id)}
                   />
 
-                  {/* Incident markers — only for selected shipment */}
+                  {/* Incident markers */}
                   {isSelected && (shipment.route_incidents?.length > 0 ? shipment.route_incidents : (incidentOverride[shipment.id] || []))
                     .map((incident, idx) => (
                       <Marker
@@ -539,9 +539,7 @@ const Dashboard = memo(function Dashboard() {
             })}
           </MapContainer>
 
-          </div>
-
-          {/* ── Left Side Floating Panel (As requested in black pen sketch) ── */}
+          {/* ── Overlays (Inside relative container for perfect pinning) ── */}
           <AnimatePresence>
             {selectedShipment && (
               <motion.div
@@ -550,26 +548,21 @@ const Dashboard = memo(function Dashboard() {
                 exit={{ opacity: 0, x: -100, scale: 0.95 }}
                 className="absolute top-4 bottom-4 left-4 w-72 z-[1001] pointer-events-none"
               >
-                <div className="h-full w-full pointer-events-auto bg-theme-secondary/90 dark:bg-[#0a0a0f]/90 backdrop-blur-2xl rounded-2xl border border-theme shadow-[0_20px_50px_rgba(0,0,0,0.5)] flex flex-col overflow-hidden">
-                  {/* Top Bar with shimmer */}
+                <div className={cn(
+                  "h-full w-full pointer-events-auto backdrop-blur-2xl rounded-2xl shadow-2xl flex flex-col overflow-hidden border",
+                  theme === 'dark' ? "bg-[#0a0a0f]/90 border-white/10" : "bg-white/90 border-slate-200"
+                )}>
                   <div className="absolute top-0 inset-x-0 h-[2px] bg-gradient-to-r from-transparent via-accent to-transparent opacity-50" />
-                  
-                  {/* Header */}
                   <div className="px-5 py-4 border-b border-theme flex items-center justify-between bg-theme-tertiary/20">
                     <div>
                       <h3 className="text-[10px] font-black uppercase tracking-widest text-theme-secondary mb-0.5">Focus Active</h3>
                       <p className="text-base font-black text-theme-primary leading-none">{selectedShipment.tracking_number}</p>
                     </div>
-                    <button 
-                      onClick={() => setSelectedId(null)}
-                      className="p-1.5 hover:bg-theme-tertiary rounded-lg transition-colors cursor-pointer"
-                    >
+                    <button onClick={() => setSelectedId(null)} className="p-1.5 hover:bg-theme-tertiary rounded-lg transition-colors cursor-pointer">
                       <X className="w-4 h-4 text-theme-secondary" />
                     </button>
                   </div>
-
                   <div className="flex-1 overflow-y-auto p-5 space-y-5 custom-scrollbar">
-                    {/* Location Info */}
                     <div className="space-y-3">
                        <div className="flex items-start gap-3">
                          <div className="mt-1 w-2 h-2 rounded-full bg-success ring-4 ring-success/20 shrink-0" />
@@ -587,73 +580,32 @@ const Dashboard = memo(function Dashboard() {
                          </div>
                        </div>
                     </div>
-
-                    {/* Status Stats Grid */}
                     <div className="grid grid-cols-2 gap-2">
                        <div className="p-3 bg-theme-tertiary/40 rounded-xl border border-theme/50">
-                          <p className="text-[9px] font-bold text-theme-secondary uppercase mb-1 flex items-center gap-1">
-                            <Clock className="w-2.5 h-2.5" /> Delay
-                          </p>
+                          <p className="text-[9px] font-bold text-theme-secondary uppercase mb-1 flex items-center gap-1"><Clock className="w-2.5 h-2.5" /> Delay</p>
                           <p className={`text-xs font-black ${selectedShipment.risk?.current?.risk_level === 'high' ? 'text-danger' : 'text-warning'}`}>
                             {selectedShipment.risk?.current?.risk_level === 'high' ? '+4.2h' : '+1.5h'}
                           </p>
                        </div>
                        <div className="p-3 bg-theme-tertiary/40 rounded-xl border border-theme/50">
-                          <p className="text-[9px] font-bold text-theme-secondary uppercase mb-1 flex items-center gap-1">
-                            <ShieldAlert className="w-2.5 h-2.5" /> Risk
-                          </p>
+                          <p className="text-[9px] font-bold text-theme-secondary uppercase mb-1 flex items-center gap-1"><ShieldAlert className="w-2.5 h-2.5" /> Risk</p>
                           <p className={`text-xs font-black uppercase ${selectedShipment.risk?.current?.risk_level === 'high' ? 'text-danger' : 'text-success'}`}>
                              {selectedShipment.risk?.current?.risk_level}
                           </p>
                        </div>
                     </div>
-
-                    {/* Weather Update (Conditional) */}
                     {selectedShipment.last_risk_assessment?.breakdown?.weather && (
                       <div className="p-3.5 bg-indigo-500/10 rounded-xl border border-indigo-500/20">
                         <div className="flex items-center justify-between mb-2">
-                          <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-1.5">
-                            <CloudRain className="w-3 h-3" /> Weather Intel
-                          </span>
-                          <span className="text-[10px] font-bold text-indigo-300">
-                             {selectedShipment.last_risk_assessment.breakdown.weather.score}/100
-                          </span>
+                          <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-1.5"><CloudRain className="w-3 h-3" /> Weather Intel</span>
+                          <span className="text-[10px] font-bold text-indigo-300">{selectedShipment.last_risk_assessment.breakdown.weather.score}/100</span>
                         </div>
-                        <p className="text-[11px] text-theme-primary font-medium leading-relaxed italic">
-                          "{selectedShipment.last_risk_assessment.breakdown.weather.reason}"
-                        </p>
+                        <p className="text-[11px] text-theme-primary font-medium leading-relaxed italic">"{selectedShipment.last_risk_assessment.breakdown.weather.reason}"</p>
                       </div>
                     )}
-
-                    {/* System Events / Alerts */}
-                    <div className="space-y-2">
-                       <p className="text-[10px] font-black text-theme-secondary uppercase tracking-[0.2em] mb-1">Telemetry Alerts</p>
-                       {(selectedShipment.route_incidents?.length > 0 || (incidentOverride[selectedId]?.length > 0)) ? (
-                         <div className="space-y-2">
-                            {(selectedShipment.route_incidents?.length > 0 ? selectedShipment.route_incidents : (incidentOverride[selectedId] || [])).slice(0, 3).map((inc, i) => (
-                              <div key={i} className="flex gap-3 p-2 bg-danger/5 border border-danger/10 rounded-lg">
-                                <AlertCircle className="w-3.5 h-3.5 text-danger shrink-0 mt-0.5" />
-                                <div>
-                                  <p className="text-[10px] font-bold text-theme-primary capitalize">{inc.type.replace('_', ' ').toLowerCase()}</p>
-                                  <p className="text-[9px] text-theme-secondary line-clamp-1">{inc.description}</p>
-                                </div>
-                              </div>
-                            ))}
-                         </div>
-                       ) : (
-                         <div className="p-3 rounded-xl border border-dashed border-theme flex items-center justify-center gap-2">
-                            <Sparkles className="w-3 h-3 text-success" />
-                            <span className="text-[10px] font-bold text-success uppercase">All paths clear</span>
-                         </div>
-                       )}
-                    </div>
                   </div>
-
-                  {/* Footer CTA */}
                   <div className="p-4 bg-theme-tertiary/20 border-t border-theme">
-                    <button className="w-full py-2.5 bg-accent hover:bg-accent/80 text-white text-[11px] font-black uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-accent/20">
-                      Initiate Protocol
-                    </button>
+                    <button className="w-full py-2.5 bg-accent hover:bg-accent/80 text-white text-[11px] font-black uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-accent/20">Initiate Protocol</button>
                   </div>
                 </div>
               </motion.div>
@@ -661,8 +613,10 @@ const Dashboard = memo(function Dashboard() {
           </AnimatePresence>
 
           {/* Network Intelligence Summary Overlay */}
-          <div className="absolute top-4 right-4 bg-theme-secondary/80 dark:bg-[#0a0a0f]/85 backdrop-blur-2xl p-4 rounded-2xl w-56 z-[1000] border border-theme shadow-2xl overflow-hidden shimmer">
-            <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent pointer-events-none" />
+          <div className={cn(
+            "absolute top-4 right-4 backdrop-blur-2xl p-4 rounded-2xl w-60 z-[1001] shadow-2xl border transition-all",
+            theme === 'dark' ? "bg-[#0a0a0f]/85 border-white/10" : "bg-white/85 border-slate-200"
+          )}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-black text-theme-primary tracking-tight uppercase text-[10px] opacity-70">Network Intelligence</h3>
               <div className="flex items-center gap-1.5">
@@ -674,35 +628,24 @@ const Dashboard = memo(function Dashboard() {
               <div className="mb-2">
                 <div className="flex justify-between text-[10px] text-theme-secondary mb-1">
                   <span>Scanning incidents…</span>
-                  <span>{fetchingIncidents} route{fetchingIncidents > 1 ? 's' : ''}</span>
+                  <span>{fetchingIncidents}</span>
                 </div>
-                <div className="w-full h-1 bg-theme-tertiary rounded-full overflow-hidden">
-                  <motion.div
-                    className="h-full bg-warning rounded-full"
-                    animate={{ x: ['-100%', '100%'] }}
-                    transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
-                  />
+                <div className="w-full h-0.5 bg-theme-tertiary rounded-full overflow-hidden">
+                  <motion.div className="h-full bg-warning rounded-full" animate={{ x: ['-100%', '100%'] }} transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }} />
                 </div>
               </div>
             )}
             {highRiskCount > 0 ? (
-              <p className="text-danger font-bold">⚠ {highRiskCount} shipment needs attention</p>
+              <p className="text-danger text-xs font-bold tracking-tight">⚠ {highRiskCount} critical alerts active</p>
             ) : (
-              <p className="text-success">✔ All shipments running smoothly</p>
+              <p className="text-success text-xs font-bold tracking-tight">✔ System operating normally</p>
             )}
-            <p className="mt-2 text-theme-secondary text-[11px]">Total Active: {shipments.length}</p>
-            {(() => {
-              const total = shipments.reduce((sum, s) => {
-                const count = s.route_incidents?.length > 0
-                  ? s.route_incidents.length
-                  : (incidentOverride[s.id]?.length ?? 0);
-                return sum + count;
-              }, 0);
-              return total > 0 ? (
-                <p className="mt-1 text-warning text-[11px]">⚠️ {total} active incidents on network</p>
-              ) : null;
-            })()}
+            <div className="mt-3 pt-3 border-t border-theme/30 flex justify-between items-center">
+               <span className="text-[10px] font-bold text-theme-secondary uppercase">Fleet Status</span>
+               <span className="text-xs font-black text-theme-primary">{shipments.length} Nodes</span>
+            </div>
           </div>
+        </div>
       </motion.div>
 
       {/* Charts row */}

@@ -7,8 +7,10 @@ import LocationAutocomplete from './LocationAutocomplete';
 import apiClient from '../../api/apiClient';
 import toast from 'react-hot-toast';
 import { cn } from '../../lib/utils';
+import { useTheme } from '../../context/ThemeContext';
 
 const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose }) {
+  const { theme } = useTheme();
   const {
     register,
     handleSubmit,
@@ -95,29 +97,44 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-theme-primary/40 backdrop-blur-md transition-all">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-500/20 backdrop-blur-sm transition-all">
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             transition={{ duration: 0.2 }}
-            className="bg-theme-secondary/90 dark:bg-[#0a0a0f]/90 backdrop-blur-2xl rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl border border-theme flex flex-col relative custom-scrollbar"
+            className={cn(
+              "backdrop-blur-2xl rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl flex flex-col relative custom-scrollbar border",
+              theme === 'dark' ? "bg-[#0a0a0f]/95 border-white/10" : "bg-white/95 border-slate-200"
+            )}
           >
             {/* Header */}
-            <div className="p-4 sm:p-6 border-b border-theme flex items-center justify-between bg-theme-tertiary/30">
+            <div className={cn(
+              "p-4 sm:p-6 border-b flex items-center justify-between",
+              theme === 'dark' ? "bg-white/5 border-white/10" : "bg-slate-50 border-slate-200"
+            )}>
               <div className="flex items-center gap-4">
                 <div className="p-2.5 bg-accent/20 rounded-xl border border-accent/30 shadow-inner">
                   <Package className="w-5 h-5 text-accent" />
                 </div>
                 <div>
-                  <h2 className="text-lg sm:text-xl font-extrabold text-theme-primary tracking-tight">Deploy New Shipment</h2>
-                  <p className="text-xs sm:text-sm text-theme-secondary font-medium hidden sm:block">Configure route and tracking parameters</p>
+                  <h2 className={cn(
+                    "text-lg sm:text-xl font-extrabold tracking-tight",
+                    theme === 'dark' ? "text-white" : "text-slate-900"
+                  )}>Deploy New Shipment</h2>
+                  <p className={cn(
+                    "text-xs sm:text-sm font-medium hidden sm:block",
+                    theme === 'dark' ? "text-slate-400" : "text-slate-500"
+                  )}>Configure route and tracking parameters</p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={onClose}
-                className="p-2 text-theme-secondary hover:text-theme-primary transition-colors rounded-xl hover:bg-theme-tertiary cursor-pointer"
+                className={cn(
+                  "p-2 transition-colors rounded-xl cursor-pointer",
+                  theme === 'dark' ? "text-slate-400 hover:text-white hover:bg-white/10" : "text-slate-500 hover:text-slate-900 hover:bg-slate-200"
+                )}
                 disabled={isSubmitting}
               >
                 <X className="w-5 h-5" />
@@ -125,11 +142,17 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
             </div>
 
             {/* Body */}
-            <div className="p-4 sm:p-6 md:p-8">
+            <div className={cn(
+              "p-4 sm:p-6 md:p-8",
+              theme === 'dark' ? "text-white" : "text-slate-900"
+            )}>
               <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
                 {/* Shipment Name */}
                 <div>
-                  <label className="block text-sm font-bold text-theme-secondary mb-2 uppercase tracking-wide">
+                  <label className={cn(
+                    "block text-sm font-bold mb-2 uppercase tracking-wide",
+                    theme === 'dark' ? "text-slate-400" : "text-slate-600"
+                  )}>
                     Shipment Name
                   </label>
                   <input
@@ -137,8 +160,9 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
                     placeholder="e.g. Mumbai-Delhi Express"
                     {...register('shipment_name', { required: 'Shipment name is required', minLength: { value: 2, message: 'Minimum 2 characters' } })}
                     className={cn(
-                      'w-full bg-theme-tertiary border text-theme-primary text-sm rounded-xl px-4 py-3 focus:ring-2 focus:ring-accent focus:outline-none transition-all',
-                      errors.shipment_name ? 'border-danger' : 'border-theme'
+                      'w-full border text-sm rounded-xl px-4 py-3 focus:ring-2 focus:ring-accent focus:outline-none transition-all',
+                      theme === 'dark' ? "bg-white/5 border-white/10 text-white" : "bg-slate-50 border-slate-200 text-slate-900",
+                      errors.shipment_name ? 'border-danger' : ''
                     )}
                   />
                   {errors.shipment_name && (
@@ -148,7 +172,10 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
 
                 {/* Origin */}
                 <div>
-                  <label className="block text-sm font-bold text-theme-secondary mb-2 uppercase tracking-wide">
+                  <label className={cn(
+                    "block text-sm font-bold mb-2 uppercase tracking-wide",
+                    theme === 'dark' ? "text-slate-400" : "text-slate-600"
+                  )}>
                     Origin City
                   </label>
                   <LocationAutocomplete
@@ -160,14 +187,14 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
                     }}
                     error={errors.origin_name}
                   />
-                  {errors.origin_name && (
-                    <p className="text-danger text-xs mt-1.5">{errors.origin_name.message}</p>
-                  )}
                 </div>
 
                 {/* Via Points */}
                 {viaPoints.map((vp, index) => (
-                  <div key={index} className="flex flex-wrap items-start gap-2 bg-theme-tertiary/20 p-3 rounded-xl border border-theme">
+                  <div key={index} className={cn(
+                    "flex flex-wrap items-start gap-2 p-3 rounded-xl border",
+                    theme === 'dark' ? "bg-white/5 border-white/10" : "bg-slate-100 border-slate-200"
+                  )}>
                      <div className="flex-1">
                         <LocationAutocomplete
                            placeholder={`Via Stop ${index + 1}...`}
@@ -176,7 +203,10 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
                         />
                      </div>
                      <select 
-                        className="bg-theme-secondary border border-theme text-theme-primary text-sm rounded-xl px-3 py-3 focus:ring-2 focus:ring-accent outline-none"
+                        className={cn(
+                          "border text-sm rounded-xl px-3 py-3 focus:ring-2 focus:ring-accent outline-none",
+                          theme === 'dark' ? "bg-slate-900 border-white/10 text-white" : "bg-white border-slate-200 text-slate-900"
+                        )}
                         value={vp.type}
                         onChange={(e) => updateViaPoint(index, 'type', e.target.value)}
                      >
@@ -185,7 +215,10 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
                         <option value="custom">Custom</option>
                      </select>
                      <select 
-                        className="bg-theme-secondary border border-theme text-theme-primary text-sm rounded-xl px-2 py-3 focus:ring-2 focus:ring-accent outline-none min-w-[100px]"
+                        className={cn(
+                          "border text-sm rounded-xl px-2 py-3 focus:ring-2 focus:ring-accent outline-none min-w-[100px]",
+                          theme === 'dark' ? "bg-slate-900 border-white/10 text-white" : "bg-white border-slate-200 text-slate-900"
+                        )}
                         value={vp.stop_duration_minutes || 0}
                         onChange={(e) => updateViaPoint(index, 'stop_duration_minutes', parseInt(e.target.value, 10))}
                      >
@@ -217,7 +250,10 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
 
                 {/* Destination */}
                 <div>
-                  <label className="block text-sm font-bold text-theme-secondary mb-2 uppercase tracking-wide">
+                  <label className={cn(
+                    "block text-sm font-bold mb-2 uppercase tracking-wide",
+                    theme === 'dark' ? "text-slate-400" : "text-slate-600"
+                  )}>
                     Destination City
                   </label>
                   <LocationAutocomplete
@@ -229,15 +265,15 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
                     }}
                     error={errors.destination_name}
                   />
-                  {errors.destination_name && (
-                    <p className="text-danger text-xs mt-1.5">{errors.destination_name.message}</p>
-                  )}
                 </div>
 
                 {/* Upstream dependency */}
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
-                    <label className="block text-sm font-bold text-theme-secondary uppercase tracking-wide">
+                    <label className={cn(
+                      "block text-sm font-bold uppercase tracking-wide",
+                      theme === 'dark' ? "text-slate-400" : "text-slate-600"
+                    )}>
                       Systemic Dependency
                     </label>
                     <div className="px-2 py-1 bg-accent/10 border border-accent/20 rounded-md">
@@ -249,47 +285,50 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
                     <select
                       value={upstreamId}
                       onChange={e => setUpstreamId(e.target.value)}
-                      className="w-full bg-theme-tertiary border border-theme text-theme-primary text-sm rounded-xl px-4 py-3.5 focus:ring-2 focus:ring-accent focus:outline-none transition-all appearance-none cursor-pointer pr-10 font-bold"
+                      className={cn(
+                        "w-full border text-sm rounded-xl px-4 py-3.5 focus:ring-2 focus:ring-accent focus:outline-none transition-all appearance-none cursor-pointer pr-10 font-bold",
+                        theme === 'dark' ? "bg-white/5 border-white/10 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
+                      )}
                     >
-                      <option value="" className="bg-slate-900 text-slate-400">⚡ INDEPENDENT OPERATION (Direct Deployment)</option>
+                      <option value="" className={theme === 'dark' ? "bg-slate-900" : "bg-white"}>⚡ INDEPENDENT OPERATION (Direct Deployment)</option>
                       {availableShipments.map(s => (
                         <option 
                           key={s.id} 
                           value={s.id} 
-                          className="bg-slate-900 text-white py-2"
+                          className={theme === 'dark' ? "bg-slate-900" : "bg-white"}
                         >
                           🔗 {s.shipment_name.toUpperCase()} (Arrives: {s.destination_name})
                         </option>
                       ))}
                     </select>
-                    <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-theme-secondary opacity-50 group-hover:opacity-100 transition-opacity">
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none opacity-50 group-hover:opacity-100 transition-opacity">
                       <svg className="w-4 h-4 fill-current" viewBox="0 0 20 20">
                         <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" />
                       </svg>
                     </div>
                   </div>
 
-                  {/* Visual Breakdown / Wireframe-like element */}
+                  {/* Visual Breakdown */}
                   <div className={cn(
                     "p-4 rounded-xl border transition-all duration-300",
                     upstreamId 
                       ? "bg-accent/5 border-accent/20" 
-                      : "bg-theme-tertiary/20 border-theme opacity-40 grayscale"
+                      : (theme === 'dark' ? "bg-white/5 border-white/10 opacity-40 grayscale" : "bg-slate-50 border-slate-200 opacity-40 grayscale")
                   )}>
                     <div className="flex items-center gap-4">
                       <div className="flex flex-col items-center gap-1 shrink-0">
-                        <div className={cn("w-3 h-3 rounded-full", upstreamId ? "bg-accent animate-pulse" : "bg-theme-secondary")} />
+                        <div className={cn("w-3 h-3 rounded-full", upstreamId ? "bg-accent animate-pulse" : (theme === 'dark' ? "bg-white/10" : "bg-slate-200"))} />
                         <div className="w-[2px] h-6 bg-gradient-to-b from-current to-transparent opacity-20" />
-                        <div className={cn("w-3 h-3 rounded-full border-2", upstreamId ? "border-accent" : "border-theme-secondary")} />
+                        <div className={cn("w-3 h-3 rounded-full border-2", upstreamId ? "border-accent" : (theme === 'dark' ? "border-white/10" : "border-slate-200"))} />
                       </div>
                       <div className="flex-1 space-y-2">
                         <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-black text-theme-secondary uppercase tracking-widest">Logic Stream</span>
-                          <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded", upstreamId ? "bg-accent text-white" : "bg-theme-tertiary text-theme-secondary")}>
+                          <span className={cn("text-[10px] font-black uppercase tracking-widest", theme === 'dark' ? "text-slate-500" : "text-slate-400")}>Logic Stream</span>
+                          <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded", upstreamId ? "bg-accent text-white" : (theme === 'dark' ? "bg-white/10 text-slate-500" : "bg-slate-200 text-slate-500"))}>
                             {upstreamId ? 'LOCKED' : 'DIRECT'}
                           </span>
                         </div>
-                        <p className="text-[11px] leading-relaxed text-theme-primary font-medium">
+                        <p className={cn("text-[11px] leading-relaxed font-medium", theme === 'dark' ? "text-slate-300" : "text-slate-700")}>
                           {upstreamId ? (
                             <>This shipment will <span className="text-accent font-black">depart only after</span> the delivery of its prerequisite. Real-time ETA delays will automatically push back this deployment schedule.</>
                           ) : (
@@ -302,17 +341,20 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
                 </div>
 
                 {/* Auto-Reroute Toggle */}
-                <div className="flex items-center justify-between p-4 bg-theme-tertiary/50 border border-theme rounded-xl">
+                <div className={cn(
+                  "flex items-center justify-between p-4 rounded-xl border",
+                  theme === 'dark' ? "bg-white/5 border-white/10" : "bg-slate-50 border-slate-200"
+                )}>
                   <div>
-                    <p className="text-sm font-bold text-theme-primary">Auto-Reroute (Emergency)</p>
-                    <p className="text-xs text-theme-secondary mt-0.5">Automatically reroute on critical risk detection</p>
+                    <p className={cn("text-sm font-bold", theme === 'dark' ? "text-white" : "text-slate-900")}>Auto-Reroute (Emergency)</p>
+                    <p className={cn("text-xs mt-0.5", theme === 'dark' ? "text-slate-400" : "text-slate-500")}>Automatically reroute on critical risk detection</p>
                   </div>
                   <button
                     type="button"
                     onClick={() => setValue('auto_reroute_enabled', !autoReroute)}
                     className={cn(
                       'relative inline-flex h-6 w-11 items-center rounded-full border transition-colors duration-200 cursor-pointer',
-                      autoReroute ? 'bg-accent border-accent' : 'bg-theme-primary border-theme'
+                      autoReroute ? 'bg-accent border-accent' : (theme === 'dark' ? 'bg-slate-800 border-white/10' : 'bg-slate-200 border-slate-300')
                     )}
                   >
                     <span
@@ -325,7 +367,7 @@ const CreateShipmentModal = memo(function CreateShipmentModal({ isOpen, onClose 
                 </div>
 
                 {/* Submit */}
-                <div className="pt-2 border-t border-theme">
+                <div className={cn("pt-2 border-t", theme === 'dark' ? "border-white/10" : "border-slate-200")}>
                   <button
                     type="submit"
                     disabled={isSubmitting}
