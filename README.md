@@ -367,18 +367,6 @@ Send `"ping"` → server responds `{"type": "pong"}`.
 - **Used for:** Place → coordinates (geocoding) and coordinates → city names (reverse geocoding for Gemini context)
 
 ---
-
-## 🛡️ Safety & Data Isolation
-
-The platform enforces strict separation between production and simulation:
-
-| Concern | Production | Simulation |
-|---------|-----------|------------|
-| **Collection** | `decisions` | `simulation_decisions` |
-| **Source tag** | `REAL_SYSTEM` | `SIMULATOR` |
-| **Modifies shipments?** | ✅ Yes (reroutes) | ❌ Never |
-| **Safety check** | — | `system_mode == "REAL"` → HTTP 403 |
-
 ---
 
 ## 📐 Architecture Diagram
